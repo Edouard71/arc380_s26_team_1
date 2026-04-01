@@ -3,6 +3,7 @@ from typing import Optional
 import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionClient
+from rclpy.parameter import Parameter
 
 from builtin_interfaces.msg import Duration
 from sensor_msgs.msg import JointState
@@ -37,6 +38,7 @@ class PlanAndExecuteClient(Node):
 
     def __init__(self):
         super().__init__("plan_and_execute_client")
+        self.set_parameters([Parameter("use_sim_time", value=True)])
 
         # MoveIt planning service
         self.plan_cli = self.create_client(GetMotionPlan, "/plan_kinematic_path")
@@ -389,44 +391,50 @@ class PlanAndExecuteClient(Node):
     def send_gripper_command(
         self,
         position: float,
-        max_velocity: float = 0.02,
-        max_effort: float = 0.0,
+        max_velocity: float = 0.02, #originally 0.02
+        max_effort: float = 0.0, #originally 0.0
         joint_name: str = "left_finger_joint",
     ) -> bool:
         if not self.gripper_cmd_ac.wait_for_server(timeout_sec=5.0):
             self.get_logger().error("ParallelGripperCommand action server not available.")
             return False
+        
+        keep_trying = True
+        while(keep_trying):
+            goal = ParallelGripperCommand.Goal()
+            goal.command.name = [joint_name]
+            goal.command.position = [float(position)]
 
-        goal = ParallelGripperCommand.Goal()
-        goal.command.name = [joint_name]
-        goal.command.position = [float(position)]
+            if max_velocity > 0.0:
+                goal.command.velocity = [float(max_velocity)]
 
-        if max_velocity > 0.0:
-            goal.command.velocity = [float(max_velocity)]
+            if max_effort > 0.0:
+                goal.command.effort = [float(max_effort)]
 
-        if max_effort > 0.0:
-            goal.command.effort = [float(max_effort)]
+            send_future = self.gripper_cmd_ac.send_goal_async(goal)
+            # send_future = self.gripper_cmd_ac.send_goal(goal)
+            rclpy.spin_until_future_complete(self, send_future)
+            goal_handle = send_future.result()
 
-        send_future = self.gripper_cmd_ac.send_goal_async(goal)
-        rclpy.spin_until_future_complete(self, send_future)
-        goal_handle = send_future.result()
+            if goal_handle is None or not goal_handle.accepted:
+                self.get_logger().error("Gripper command goal rejected.")
+                return False
 
-        if goal_handle is None or not goal_handle.accepted:
-            self.get_logger().error("Gripper command goal rejected.")
-            return False
+            result_future = goal_handle.get_result_async()
+            # result_future = goal_handle.get_result()
+            rclpy.spin_until_future_complete(self, result_future)
+            result = result_future.result()
 
-        result_future = goal_handle.get_result_async()
-        rclpy.spin_until_future_complete(self, result_future)
-        result = result_future.result()
+            if result is None:
+                self.get_logger().error("Failed to get gripper command result.")
+                return False
 
-        if result is None:
-            self.get_logger().error("Failed to get gripper command result.")
-            return False
-
-        self.get_logger().info("Gripper command completed.")
-        self.get_logger().info(
-            f"stalled={result.result.stalled}, reached_goal={result.result.reached_goal}"
-        )
+            self.get_logger().info("Gripper command completed.")
+            self.get_logger().info(
+                f"stalled={result.result.stalled}, reached_goal={result.result.reached_goal}"
+            )
+            # keep_trying = result.result.stalled
+            keep_trying = False
         return True
 
 
@@ -442,40 +450,216 @@ def main():
         max_velocity=0.05,
     )
 
-    arm_traj = node.plan_arm_to_pose_constraints(
-        group_name="arm",
-        link_name="gripper_tcp",
-        frame_id="world",
-        goal_xyz=(0.0, 0.480, 0.1),
-        goal_quat_wxyz=(0.0, 1.0, 0.0, 0.0),
-    )
-    if arm_traj is not None:
-        node.execute_moveit_trajectory(arm_traj)
+    a = 0.70717
+    b = 0.92388
+    c = 0.38268
 
-    arm_traj = node.plan_arm_to_pose_constraints(
-        group_name="arm",
-        link_name="gripper_tcp",
-        frame_id="world",
-        goal_xyz=(0.0, 0.480, 0.032),
-        goal_quat_wxyz=(0.0, 1.0, 0.0, 0.0),
-    )
-    if arm_traj is not None:
-        node.execute_moveit_trajectory(arm_traj)
+    tower_x = 0.419
+    tower_y = 0.221
+    parallel_dx = 0.043
+    parallel_dy = 0.043
+    diagonal_dx = 0.043 * 0.707
+    diagonal_dy = 0.043 * 0.707
+    base_z = 0.014 / 2
+    dz = 0.014
+    large_clearance_z = 0.1
+    drop_clearance_z = 0.01
 
-    node.send_gripper_command(
-        position=gripper_closed,
-        max_velocity=0.05,
-    )
+    first_block_x = 0.0
+    first_block_y = 0.480
+    above_block_z = 0.1
+    around_block_z = 0.032
+    holder_dx = 0.06
+    holder_dy = 0.06
+    # num_x_blocks = 4
+    num_y_blocks = 5
+
+
+    tower_block_points = [
+        [[tower_x+parallel_dx, tower_y, base_z], [0.0, a, a, 0.0]],
+        [[tower_x, tower_y+parallel_dy, base_z], [0.0, 1.0, 0.0, 0.0]],
+        [[tower_x-parallel_dx, tower_y, base_z], [0.0, a, a, 0.0]],
+        [[tower_x, tower_y-parallel_dy, base_z], [0.0, 1.0, 0.0, 0.0]],
+        [[tower_x+diagonal_dx, tower_y+diagonal_dy, base_z+dz], [0.0, b, -c, 0.0]],
+        [[tower_x-diagonal_dx, tower_y+diagonal_dy, base_z+dz], [0.0, b, c, 0.0]],
+        [[tower_x-diagonal_dx, tower_y-diagonal_dy, base_z+dz], [0.0, b, -c, 0.0]],
+        [[tower_x-diagonal_dx, tower_y+diagonal_dy, base_z+dz], [0.0, b, c, 0.0]],
+    ]
+
+    index = 0
+    for point, angle in tower_block_points:
+        num_block_x = index % num_y_blocks
+        num_block_y = int(index / num_y_blocks)
+
+        #Open gripper
+        node.send_gripper_command(
+            position=gripper_open,
+            max_velocity=0.05,
+        )
+
+        #Move to above block
+        arm_traj = node.plan_arm_to_pose_constraints(
+            group_name="arm",
+            link_name="gripper_tcp",
+            frame_id="world",
+            goal_xyz=(num_block_x*holder_dx, first_block_y - num_block_y*holder_dy, above_block_z),
+            goal_quat_wxyz=(0.0, 1.0, 0.0, 0.0),
+        )
+        if arm_traj is not None:
+            node.execute_moveit_trajectory(arm_traj)
+
+        #Move down
+        arm_traj = node.plan_arm_to_pose_constraints(
+            group_name="arm",
+            link_name="gripper_tcp",
+            frame_id="world",
+            goal_xyz=(num_block_x*holder_dx, first_block_y - num_block_y*holder_dy, around_block_z),
+            goal_quat_wxyz=(0.0, 1.0, 0.0, 0.0),
+        )
+        if arm_traj is not None:
+            node.execute_moveit_trajectory(arm_traj)
+
+        #Grab block
+        node.send_gripper_command(
+            position=gripper_closed,
+            max_velocity=0.05,
+        )
+
+        #Move up
+        arm_traj = node.plan_arm_to_pose_constraints(
+            group_name="arm",
+            link_name="gripper_tcp",
+            frame_id="world",
+            goal_xyz=(num_block_x*holder_dx, first_block_y - num_block_y*holder_dy, above_block_z),
+            goal_quat_wxyz=(0.0, 1.0, 0.0, 0.0),
+        )
+        if arm_traj is not None:
+            node.execute_moveit_trajectory(arm_traj)
+
+        #Move to above block's placement point
+        arm_traj = node.plan_arm_to_pose_constraints(
+            group_name="arm",
+            link_name="gripper_tcp",
+            frame_id="world",
+            goal_xyz=(point[0], point[1], point[2] + large_clearance_z),
+            goal_quat_wxyz=(angle[0], angle[1], angle[2], angle[3]),
+        )
+        if arm_traj is not None:
+            node.execute_moveit_trajectory(arm_traj)
+
+        #Move down
+        arm_traj = node.plan_arm_to_pose_constraints(
+            group_name="arm",
+            link_name="gripper_tcp",
+            frame_id="world",
+            goal_xyz=(point[0], point[1], point[2] + drop_clearance_z),
+            goal_quat_wxyz=(angle[0], angle[1], angle[2], angle[3]),
+        )
+        if arm_traj is not None:
+            node.execute_moveit_trajectory(arm_traj)
+
+        #Drop block
+        node.send_gripper_command(
+            position=gripper_open,
+            max_velocity=0.05,
+        )
+
+        #Move Up
+        arm_traj = node.plan_arm_to_pose_constraints(
+            group_name="arm",
+            link_name="gripper_tcp",
+            frame_id="world",
+            goal_xyz=(point[0], point[1], point[2] + large_clearance_z),
+            goal_quat_wxyz=(angle[0], angle[1], angle[2], angle[3]),
+        )
+        if arm_traj is not None:
+            node.execute_moveit_trajectory(arm_traj)
+
+        index += 1
+
+
+
+
+    # # Move arm to above first block
+    # arm_traj = node.plan_arm_to_pose_constraints(
+    #     group_name="arm",
+    #     link_name="gripper_tcp",
+    #     frame_id="world",
+    #     goal_xyz=(0.0, 0.480, 0.1),
+    #     goal_quat_wxyz=(0.0, 1.0, 0.0, 0.0),
+    # )
+    # if arm_traj is not None:
+    #     node.execute_moveit_trajectory(arm_traj)
+
+    # # Move arm to around first block
+    # arm_traj = node.plan_arm_to_pose_constraints(
+    #     group_name="arm",
+    #     link_name="gripper_tcp",
+    #     frame_id="world",
+    #     goal_xyz=(0.0, 0.480, 0.032),
+    #     goal_quat_wxyz=(0.0, 1.0, 0.0, 0.0),
+    # )
+    # if arm_traj is not None:
+    #     node.execute_moveit_trajectory(arm_traj)
+
+    # # Grab block
+    # node.send_gripper_command(
+    #     position=gripper_closed,
+    #     max_velocity=0.05,
+    # )
     
-    arm_traj = node.plan_arm_to_pose_constraints(
-        group_name="arm",
-        link_name="gripper_tcp",
-        frame_id="world",
-        goal_xyz=(0.0, 0.480, 0.1),
-        goal_quat_wxyz=(0.0, 1.0, 0.0, 0.0),
-    )
-    if arm_traj is not None:
-        node.execute_moveit_trajectory(arm_traj)
+    # # Move up
+    # arm_traj = node.plan_arm_to_pose_constraints(
+    #     group_name="arm",
+    #     link_name="gripper_tcp",
+    #     frame_id="world",
+    #     goal_xyz=(0.0, 0.480, 0.1),
+    #     goal_quat_wxyz=(0.0, 1.0, 0.0, 0.0),
+    # )
+    # if arm_traj is not None:
+    #     node.execute_moveit_trajectory(arm_traj)
+
+    # # Move to first block position
+    # arm_traj = node.plan_arm_to_pose_constraints(
+    #     group_name="arm",
+    #     link_name="gripper_tcp",
+    #     frame_id="world",
+    #     goal_xyz=(0.419, 0.178, 0.1),
+    #     goal_quat_wxyz=(0.0, 1.0, 0.0, 0.0),
+    # )
+    # if arm_traj is not None:
+    #     node.execute_moveit_trajectory(arm_traj)
+
+    # # Moves Arm Down
+    # arm_traj = node.plan_arm_to_pose_constraints(
+    #     group_name="arm",
+    #     link_name="gripper_tcp",
+    #     frame_id="world",
+    #     goal_xyz=(0.419, 0.178, 0.035),
+    #     goal_quat_wxyz=(0.0, 1.0, 0.0, 0.0),
+    # )
+    # if arm_traj is not None:
+    #     node.execute_moveit_trajectory(arm_traj)
+        
+    # # Opens Gripper 
+    # node.send_gripper_command(
+    #     position=gripper_open,
+    #     max_velocity=0.05,
+    # )
+
+    # # Moves Arm Up
+    # arm_traj = node.plan_arm_to_pose_constraints(
+    #     group_name="arm",
+    #     link_name="gripper_tcp",
+    #     frame_id="world",
+    #     goal_xyz=(0.419, 0.178, 0.1),
+    #     goal_quat_wxyz=(0.0, 1.0, 0.0, 0.0),
+    # )
+    # if arm_traj is not None:
+    #     node.execute_moveit_trajectory(arm_traj)
+
+    # # Move to Next Second Block Position
+    
 
     node.destroy_node()
     rclpy.shutdown()

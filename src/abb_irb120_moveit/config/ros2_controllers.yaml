@@ -46,8 +46,14 @@ arm_controller:
 gripper_controller:
   ros__parameters:
     joint: left_finger_joint
+    command_interfaces:
+      - position
     state_interfaces:
       - position
       - velocity
     action_monitor_rate: 20.0
-    goal_tolerance: 0.0005
+    max_effort: 300.0
+    goal_tolerance: 0.001
+    allow_stalling: true
+    stall_velocity_threshold: 0.005
+    stall_timeout: 1.0

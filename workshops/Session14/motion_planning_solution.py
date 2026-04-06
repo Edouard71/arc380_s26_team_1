@@ -399,42 +399,39 @@ class PlanAndExecuteClient(Node):
             self.get_logger().error("ParallelGripperCommand action server not available.")
             return False
         
-        keep_trying = True
-        while(keep_trying):
-            goal = ParallelGripperCommand.Goal()
-            goal.command.name = [joint_name]
-            goal.command.position = [float(position)]
+        goal = ParallelGripperCommand.Goal()
+        goal.command.name = [joint_name]
+        goal.command.position = [float(position)]
 
-            if max_velocity > 0.0:
-                goal.command.velocity = [float(max_velocity)]
+        if max_velocity > 0.0:
+            goal.command.velocity = [float(max_velocity)]
 
-            if max_effort > 0.0:
-                goal.command.effort = [float(max_effort)]
+        if max_effort > 0.0:
+            goal.command.effort = [float(max_effort)]
 
-            send_future = self.gripper_cmd_ac.send_goal_async(goal)
-            # send_future = self.gripper_cmd_ac.send_goal(goal)
-            rclpy.spin_until_future_complete(self, send_future)
-            goal_handle = send_future.result()
+        send_future = self.gripper_cmd_ac.send_goal_async(goal)
+        # send_future = self.gripper_cmd_ac.send_goal(goal)
+        rclpy.spin_until_future_complete(self, send_future)
+        goal_handle = send_future.result()
 
-            if goal_handle is None or not goal_handle.accepted:
-                self.get_logger().error("Gripper command goal rejected.")
-                return False
+        if goal_handle is None or not goal_handle.accepted:
+            self.get_logger().error("Gripper command goal rejected.")
+            return False
 
-            result_future = goal_handle.get_result_async()
-            # result_future = goal_handle.get_result()
-            rclpy.spin_until_future_complete(self, result_future)
-            result = result_future.result()
+        result_future = goal_handle.get_result_async()
+        # result_future = goal_handle.get_result()
+        rclpy.spin_until_future_complete(self, result_future)
+        result = result_future.result()
 
-            if result is None:
-                self.get_logger().error("Failed to get gripper command result.")
-                return False
+        if result is None:
+            self.get_logger().error("Failed to get gripper command result.")
+            return False
 
-            self.get_logger().info("Gripper command completed.")
-            self.get_logger().info(
-                f"stalled={result.result.stalled}, reached_goal={result.result.reached_goal}"
-            )
-            # keep_trying = result.result.stalled
-            keep_trying = False
+        self.get_logger().info("Gripper command completed.")
+        self.get_logger().info(
+            f"stalled={result.result.stalled}, reached_goal={result.result.reached_goal}"
+        )
+
         return True
 
 
@@ -460,7 +457,8 @@ def main():
     parallel_dy = 0.043
     diagonal_dx = 0.043 * 0.707
     diagonal_dy = 0.043 * 0.707
-    base_z = 0.014 / 2
+    # base_z = 0.014 / 2
+    base_z = 0
     dz = 0.014
     large_clearance_z = 0.1
     drop_clearance_z = 0.01
@@ -483,7 +481,7 @@ def main():
         [[tower_x+diagonal_dx, tower_y+diagonal_dy, base_z+dz], [0.0, b, -c, 0.0]],
         [[tower_x-diagonal_dx, tower_y+diagonal_dy, base_z+dz], [0.0, b, c, 0.0]],
         [[tower_x-diagonal_dx, tower_y-diagonal_dy, base_z+dz], [0.0, b, -c, 0.0]],
-        [[tower_x-diagonal_dx, tower_y+diagonal_dy, base_z+dz], [0.0, b, c, 0.0]],
+        [[tower_x+diagonal_dx, tower_y-diagonal_dy, base_z+dz], [0.0, b, c, 0.0]],
     ]
 
     index = 0
@@ -541,7 +539,7 @@ def main():
             group_name="arm",
             link_name="gripper_tcp",
             frame_id="world",
-            goal_xyz=(point[0], point[1], point[2] + large_clearance_z),
+            goal_xyz=(point[0], point[1], point[2] + around_block_z + large_clearance_z),
             goal_quat_wxyz=(angle[0], angle[1], angle[2], angle[3]),
         )
         if arm_traj is not None:
@@ -552,7 +550,7 @@ def main():
             group_name="arm",
             link_name="gripper_tcp",
             frame_id="world",
-            goal_xyz=(point[0], point[1], point[2] + drop_clearance_z),
+            goal_xyz=(point[0], point[1], point[2] + around_block_z + drop_clearance_z),
             goal_quat_wxyz=(angle[0], angle[1], angle[2], angle[3]),
         )
         if arm_traj is not None:
@@ -569,7 +567,7 @@ def main():
             group_name="arm",
             link_name="gripper_tcp",
             frame_id="world",
-            goal_xyz=(point[0], point[1], point[2] + large_clearance_z),
+            goal_xyz=(point[0], point[1], point[2] + around_block_z + large_clearance_z),
             goal_quat_wxyz=(angle[0], angle[1], angle[2], angle[3]),
         )
         if arm_traj is not None:

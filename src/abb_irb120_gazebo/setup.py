@@ -19,6 +19,7 @@ data_files = [
     (os.path.join('share', package_name, 'launch'), glob('launch/*.launch.py')),
     (os.path.join('share', package_name, 'worlds'), glob('worlds/*')),
     (os.path.join('share', package_name, 'config'), glob('config/*.yaml')),
+    (os.path.join('share', package_name, 'abb_irb120_gazebo'), glob('abb_irb120_gazebo/*')),
 ]
 
 data_files += data_files_from_dir('models', os.path.join('share', package_name, 'models'))
@@ -34,5 +35,9 @@ setup(
     maintainer_email='daniel.ruan@princeton.edu',
     description='Package for simulating the ABB IRB120 robot in Gazebo',
     license='Apache License 2.0',
-    entry_points={'console_scripts': []},
+    entry_points={
+        'console_scripts': [
+            'simulation_reset_node = abb_irb120_gazebo.simulation_reset_node:main',
+        ],
+    },
 )

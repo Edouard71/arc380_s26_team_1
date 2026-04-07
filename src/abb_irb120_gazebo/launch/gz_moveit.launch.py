@@ -101,6 +101,13 @@ def generate_launch_description():
         output="screen",
     )
 
+    simulation_reset = Node(
+        package="abb_irb120_gazebo",
+        executable="simulation_reset_node",
+        output="screen",
+        parameters=[{"use_sim_time": True}],
+    )
+
     move_group = Node(
         package="moveit_ros_move_group",
         executable="move_group",
@@ -154,7 +161,7 @@ def generate_launch_description():
             OnProcessExit(
                 target_action=gripper_controller_spawner,
                 on_exit=[
-                    TimerAction(period=2.0, actions=[move_group]),
+                    TimerAction(period=2.0, actions=[move_group, simulation_reset]),
                     TimerAction(period=4.0, actions=[rviz]),
                 ],
             )

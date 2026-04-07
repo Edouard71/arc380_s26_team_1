@@ -9,3 +9,7 @@ log/
 
 # Workshops
 src/arc380*
+
+# python
+__pycache__/
+*.pyc

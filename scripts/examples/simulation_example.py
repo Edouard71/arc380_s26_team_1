@@ -1,43 +1,32 @@
 from typing import Optional
 
 import rclpy
-from rclpy.node import Node
-from rclpy.action import ActionClient
-from rclpy.parameter import Parameter
-
 from builtin_interfaces.msg import Duration
-from sensor_msgs.msg import JointState
-from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
-
-from moveit_msgs.srv import GetMotionPlan
+from control_msgs.action import FollowJointTrajectory, ParallelGripperCommand
+from geometry_msgs.msg import PoseStamped
 from moveit_msgs.action import ExecuteTrajectory
 from moveit_msgs.msg import (
-    MotionPlanRequest,
-    Constraints,
-    PositionConstraint,
-    OrientationConstraint,
     BoundingVolume,
+    Constraints,
+    JointConstraint,
+    MotionPlanRequest,
+    OrientationConstraint,
+    PositionConstraint,
     RobotState,
     RobotTrajectory,
-    JointConstraint,
 )
-
+from moveit_msgs.srv import GetMotionPlan
+from rclpy.action import ActionClient
+from rclpy.node import Node
+from rclpy.parameter import Parameter
+from sensor_msgs.msg import JointState
 from shape_msgs.msg import SolidPrimitive
-from geometry_msgs.msg import PoseStamped
-from control_msgs.action import FollowJointTrajectory, ParallelGripperCommand
+from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
 
-class PlanAndExecuteClient(Node):
-    """
-    Extends the user's plan_kinematic_path client with:
-      - arm planning to pose constraints
-      - gripper planning to joint targets
-      - MoveIt trajectory execution
-      - direct controller execution for arm/gripper
-    """
-
+class SimulationClient(Node):
     def __init__(self):
-        super().__init__("plan_and_execute_client")
+        super().__init__("simulation_client")
         self.set_parameters([Parameter("use_sim_time", value=True)])
 
         # MoveIt planning service
@@ -47,9 +36,7 @@ class PlanAndExecuteClient(Node):
         self.get_logger().info("/plan_kinematic_path service available.")
 
         # MoveIt execution action
-        self.execute_moveit_ac = ActionClient(
-            self, ExecuteTrajectory, "/execute_trajectory"
-        )
+        self.execute_moveit_ac = ActionClient(self, ExecuteTrajectory, "/execute_trajectory")
 
         # ros2_control trajectory actions
         self.arm_traj_ac = ActionClient(
@@ -161,16 +148,13 @@ class PlanAndExecuteClient(Node):
         mres = resp.motion_plan_response
 
         if mres.error_code.val != mres.error_code.SUCCESS:
-            self.get_logger().error(
-                f"Planning failed. MoveItErrorCodes.val = {mres.error_code.val}"
-            )
+            self.get_logger().error(f"Planning failed. MoveItErrorCodes.val = {mres.error_code.val}")
             return None
 
         traj = mres.trajectory
         jt = traj.joint_trajectory
         self.get_logger().info(
-            f"Planning succeeded. JointTrajectory has {len(jt.points)} points "
-            f"for joints: {list(jt.joint_names)}"
+            f"Planning succeeded. JointTrajectory has {len(jt.points)} points for joints: {list(jt.joint_names)}"
         )
         if jt.points:
             last = jt.points[-1]
@@ -202,9 +186,7 @@ class PlanAndExecuteClient(Node):
             mpr.planner_id = planner_id
 
         if start_joint_names is not None and start_joint_positions is not None:
-            mpr.start_state = self._make_start_state(
-                start_joint_names, start_joint_positions
-            )
+            mpr.start_state = self._make_start_state(start_joint_names, start_joint_positions)
 
         constraints = Constraints()
         constraints.position_constraints = [
@@ -263,9 +245,7 @@ class PlanAndExecuteClient(Node):
             mpr.planner_id = planner_id
 
         if start_joint_names is not None and start_joint_positions is not None:
-            mpr.start_state = self._make_start_state(
-                start_joint_names, start_joint_positions
-            )
+            mpr.start_state = self._make_start_state(start_joint_names, start_joint_positions)
 
         constraints = Constraints()
         constraints.joint_constraints = [
@@ -319,9 +299,7 @@ class PlanAndExecuteClient(Node):
 
         error_code = result.result.error_code.val
         if error_code != result.result.error_code.SUCCESS:
-            self.get_logger().error(
-                f"MoveIt execution failed. MoveItErrorCodes.val = {error_code}"
-            )
+            self.get_logger().error(f"MoveIt execution failed. MoveItErrorCodes.val = {error_code}")
             return False
 
         self.get_logger().info("MoveIt execution succeeded.")
@@ -370,9 +348,7 @@ class PlanAndExecuteClient(Node):
             return False
 
         if result.result.error_code != 0:
-            self.get_logger().error(
-                f"Controller execution failed with error_code={result.result.error_code}"
-            )
+            self.get_logger().error(f"Controller execution failed with error_code={result.result.error_code}")
             return False
 
         self.get_logger().info("Controller execution succeeded.")
@@ -384,21 +360,19 @@ class PlanAndExecuteClient(Node):
         positions: list[float],
         duration_sec: float = 3.0,
     ) -> bool:
-        return self._send_follow_joint_trajectory(
-            self.arm_traj_ac, joint_names, positions, duration_sec
-        )
+        return self._send_follow_joint_trajectory(self.arm_traj_ac, joint_names, positions, duration_sec)
 
     def send_gripper_command(
         self,
         position: float,
-        max_velocity: float = 0.02, #originally 0.02
-        max_effort: float = 0.0, #originally 0.0
+        max_velocity: float = 0.02,
+        max_effort: float = 0.0,
         joint_name: str = "left_finger_joint",
     ) -> bool:
         if not self.gripper_cmd_ac.wait_for_server(timeout_sec=5.0):
             self.get_logger().error("ParallelGripperCommand action server not available.")
             return False
-        
+
         goal = ParallelGripperCommand.Goal()
         goal.command.name = [joint_name]
         goal.command.position = [float(position)]
@@ -410,7 +384,6 @@ class PlanAndExecuteClient(Node):
             goal.command.effort = [float(max_effort)]
 
         send_future = self.gripper_cmd_ac.send_goal_async(goal)
-        # send_future = self.gripper_cmd_ac.send_goal(goal)
         rclpy.spin_until_future_complete(self, send_future)
         goal_handle = send_future.result()
 
@@ -419,7 +392,6 @@ class PlanAndExecuteClient(Node):
             return False
 
         result_future = goal_handle.get_result_async()
-        # result_future = goal_handle.get_result()
         rclpy.spin_until_future_complete(self, result_future)
         result = result_future.result()
 
@@ -433,13 +405,12 @@ class PlanAndExecuteClient(Node):
             f"stalled={res.stalled}, reached_goal={res.reached_goal}, "
             f"pos={list(res.state.position)}, vel={list(res.state.velocity)}, eff={list(res.state.effort)}"
         )
-
         return True
 
 
 def main():
     rclpy.init()
-    node = PlanAndExecuteClient()
+    node = SimulationClient()
 
     gripper_open = 0.00
     gripper_closed = 0.01
@@ -449,217 +420,40 @@ def main():
         max_velocity=0.05,
     )
 
-    a = 0.70717
-    b = 0.92388
-    c = 0.38268
+    arm_traj = node.plan_arm_to_pose_constraints(
+        group_name="arm",
+        link_name="gripper_tcp",
+        frame_id="world",
+        goal_xyz=(0.0, 0.480, 0.1),
+        goal_quat_wxyz=(0.0, 1.0, 0.0, 0.0),
+    )
+    if arm_traj is not None:
+        node.execute_moveit_trajectory(arm_traj)
 
-    tower_x = 0.419
-    tower_y = 0.221
-    parallel_dx = 0.043
-    parallel_dy = 0.043
-    diagonal_dx = 0.043 * 0.707
-    diagonal_dy = 0.043 * 0.707
-    # base_z = 0.014 / 2
-    base_z = 0
-    dz = 0.014
-    large_clearance_z = 0.1
-    drop_clearance_z = 0.01
+    arm_traj = node.plan_arm_to_pose_constraints(
+        group_name="arm",
+        link_name="gripper_tcp",
+        frame_id="world",
+        goal_xyz=(0.0, 0.480, 0.032),
+        goal_quat_wxyz=(0.0, 1.0, 0.0, 0.0),
+    )
+    if arm_traj is not None:
+        node.execute_moveit_trajectory(arm_traj)
 
-    first_block_x = 0.0
-    first_block_y = 0.480
-    above_block_z = 0.1
-    around_block_z = 0.032
-    holder_dx = 0.06
-    holder_dy = 0.06
-    # num_x_blocks = 4
-    num_y_blocks = 5
+    node.send_gripper_command(
+        position=gripper_closed,
+        max_velocity=0.05,
+    )
 
-
-    tower_block_points = [
-        [[tower_x+parallel_dx, tower_y, base_z], [0.0, a, a, 0.0]],
-        [[tower_x, tower_y+parallel_dy, base_z], [0.0, 1.0, 0.0, 0.0]],
-        [[tower_x-parallel_dx, tower_y, base_z], [0.0, a, a, 0.0]],
-        [[tower_x, tower_y-parallel_dy, base_z], [0.0, 1.0, 0.0, 0.0]],
-        [[tower_x+diagonal_dx, tower_y+diagonal_dy, base_z+dz], [0.0, b, -c, 0.0]],
-        [[tower_x-diagonal_dx, tower_y+diagonal_dy, base_z+dz], [0.0, b, c, 0.0]],
-        [[tower_x-diagonal_dx, tower_y-diagonal_dy, base_z+dz], [0.0, b, -c, 0.0]],
-        [[tower_x+diagonal_dx, tower_y-diagonal_dy, base_z+dz], [0.0, b, c, 0.0]],
-    ]
-
-    index = 0
-    for point, angle in tower_block_points:
-        num_block_x = index % num_y_blocks
-        num_block_y = int(index / num_y_blocks)
-
-        #Open gripper
-        node.send_gripper_command(
-            position=gripper_open,
-            max_velocity=0.05,
-        )
-
-        #Move to above block
-        arm_traj = node.plan_arm_to_pose_constraints(
-            group_name="arm",
-            link_name="gripper_tcp",
-            frame_id="world",
-            goal_xyz=(num_block_x*holder_dx, first_block_y - num_block_y*holder_dy, above_block_z),
-            goal_quat_wxyz=(0.0, 1.0, 0.0, 0.0),
-        )
-        if arm_traj is not None:
-            node.execute_moveit_trajectory(arm_traj)
-
-        #Move down
-        arm_traj = node.plan_arm_to_pose_constraints(
-            group_name="arm",
-            link_name="gripper_tcp",
-            frame_id="world",
-            goal_xyz=(num_block_x*holder_dx, first_block_y - num_block_y*holder_dy, around_block_z),
-            goal_quat_wxyz=(0.0, 1.0, 0.0, 0.0),
-        )
-        if arm_traj is not None:
-            node.execute_moveit_trajectory(arm_traj)
-
-        #Grab block
-        node.send_gripper_command(
-            position=gripper_closed,
-            max_velocity=0.05,
-        )
-
-        #Move up
-        arm_traj = node.plan_arm_to_pose_constraints(
-            group_name="arm",
-            link_name="gripper_tcp",
-            frame_id="world",
-            goal_xyz=(num_block_x*holder_dx, first_block_y - num_block_y*holder_dy, above_block_z),
-            goal_quat_wxyz=(0.0, 1.0, 0.0, 0.0),
-        )
-        if arm_traj is not None:
-            node.execute_moveit_trajectory(arm_traj)
-
-        #Move to above block's placement point
-        arm_traj = node.plan_arm_to_pose_constraints(
-            group_name="arm",
-            link_name="gripper_tcp",
-            frame_id="world",
-            goal_xyz=(point[0], point[1], point[2] + around_block_z + large_clearance_z),
-            goal_quat_wxyz=(angle[0], angle[1], angle[2], angle[3]),
-        )
-        if arm_traj is not None:
-            node.execute_moveit_trajectory(arm_traj)
-
-        #Move down
-        arm_traj = node.plan_arm_to_pose_constraints(
-            group_name="arm",
-            link_name="gripper_tcp",
-            frame_id="world",
-            goal_xyz=(point[0], point[1], point[2] + around_block_z + drop_clearance_z),
-            goal_quat_wxyz=(angle[0], angle[1], angle[2], angle[3]),
-        )
-        if arm_traj is not None:
-            node.execute_moveit_trajectory(arm_traj)
-
-        #Drop block
-        node.send_gripper_command(
-            position=gripper_open,
-            max_velocity=0.05,
-        )
-
-        #Move Up
-        arm_traj = node.plan_arm_to_pose_constraints(
-            group_name="arm",
-            link_name="gripper_tcp",
-            frame_id="world",
-            goal_xyz=(point[0], point[1], point[2] + around_block_z + large_clearance_z),
-            goal_quat_wxyz=(angle[0], angle[1], angle[2], angle[3]),
-        )
-        if arm_traj is not None:
-            node.execute_moveit_trajectory(arm_traj)
-
-        index += 1
-
-
-
-
-    # # Move arm to above first block
-    # arm_traj = node.plan_arm_to_pose_constraints(
-    #     group_name="arm",
-    #     link_name="gripper_tcp",
-    #     frame_id="world",
-    #     goal_xyz=(0.0, 0.480, 0.1),
-    #     goal_quat_wxyz=(0.0, 1.0, 0.0, 0.0),
-    # )
-    # if arm_traj is not None:
-    #     node.execute_moveit_trajectory(arm_traj)
-
-    # # Move arm to around first block
-    # arm_traj = node.plan_arm_to_pose_constraints(
-    #     group_name="arm",
-    #     link_name="gripper_tcp",
-    #     frame_id="world",
-    #     goal_xyz=(0.0, 0.480, 0.032),
-    #     goal_quat_wxyz=(0.0, 1.0, 0.0, 0.0),
-    # )
-    # if arm_traj is not None:
-    #     node.execute_moveit_trajectory(arm_traj)
-
-    # # Grab block
-    # node.send_gripper_command(
-    #     position=gripper_closed,
-    #     max_velocity=0.05,
-    # )
-    
-    # # Move up
-    # arm_traj = node.plan_arm_to_pose_constraints(
-    #     group_name="arm",
-    #     link_name="gripper_tcp",
-    #     frame_id="world",
-    #     goal_xyz=(0.0, 0.480, 0.1),
-    #     goal_quat_wxyz=(0.0, 1.0, 0.0, 0.0),
-    # )
-    # if arm_traj is not None:
-    #     node.execute_moveit_trajectory(arm_traj)
-
-    # # Move to first block position
-    # arm_traj = node.plan_arm_to_pose_constraints(
-    #     group_name="arm",
-    #     link_name="gripper_tcp",
-    #     frame_id="world",
-    #     goal_xyz=(0.419, 0.178, 0.1),
-    #     goal_quat_wxyz=(0.0, 1.0, 0.0, 0.0),
-    # )
-    # if arm_traj is not None:
-    #     node.execute_moveit_trajectory(arm_traj)
-
-    # # Moves Arm Down
-    # arm_traj = node.plan_arm_to_pose_constraints(
-    #     group_name="arm",
-    #     link_name="gripper_tcp",
-    #     frame_id="world",
-    #     goal_xyz=(0.419, 0.178, 0.035),
-    #     goal_quat_wxyz=(0.0, 1.0, 0.0, 0.0),
-    # )
-    # if arm_traj is not None:
-    #     node.execute_moveit_trajectory(arm_traj)
-        
-    # # Opens Gripper 
-    # node.send_gripper_command(
-    #     position=gripper_open,
-    #     max_velocity=0.05,
-    # )
-
-    # # Moves Arm Up
-    # arm_traj = node.plan_arm_to_pose_constraints(
-    #     group_name="arm",
-    #     link_name="gripper_tcp",
-    #     frame_id="world",
-    #     goal_xyz=(0.419, 0.178, 0.1),
-    #     goal_quat_wxyz=(0.0, 1.0, 0.0, 0.0),
-    # )
-    # if arm_traj is not None:
-    #     node.execute_moveit_trajectory(arm_traj)
-
-    # # Move to Next Second Block Position
-    
+    arm_traj = node.plan_arm_to_pose_constraints(
+        group_name="arm",
+        link_name="gripper_tcp",
+        frame_id="world",
+        goal_xyz=(0.0, 0.480, 0.1),
+        goal_quat_wxyz=(0.0, 1.0, 0.0, 0.0),
+    )
+    if arm_traj is not None:
+        node.execute_moveit_trajectory(arm_traj)
 
     node.destroy_node()
     rclpy.shutdown()

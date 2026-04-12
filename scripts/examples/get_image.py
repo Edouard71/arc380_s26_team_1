@@ -7,7 +7,8 @@ import cv2
 import numpy as np
 
 
-SHARED_DIR = Path("/realsense_shared")
+# SHARED_DIR = Path("/realsense_shared")
+SHARED_DIR = Path(r"C:\Users\alexl\Documents\Python_Scripts\ARC380\ARC380_Team_1\arc380_s26_team_1\realsense_shared")
 REQUEST_PATH = SHARED_DIR / "request.json"
 READY_PATH = SHARED_DIR / "ready.json"
 COLOR_PATH = SHARED_DIR / "color.png"

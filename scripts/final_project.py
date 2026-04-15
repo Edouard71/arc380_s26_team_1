@@ -20,10 +20,304 @@ from rclpy.node import Node
 from rclpy.parameter import Parameter
 from sensor_msgs.msg import JointState
 from shape_msgs.msg import SolidPrimitive
-import numpy as np
 
 from abb_egm_interfaces.action import ExecuteTrajectory
 
+import json
+from pathlib import Path
+from typing import Any
+
+import cv2
+import numpy as np
+from cv2 import aruco
+import matplotlib.pyplot as plt
+
+class ImageCapture:
+    # SHARED_DIR = Path("/realsense_shared")
+    SHARED_DIR = Path(r"C:\Users\alexl\Documents\Python_Scripts\ARC380\ARC380_Team_1\arc380_s26_team_1\realsense_shared")
+    REQUEST_PATH = SHARED_DIR / "request.json"
+    READY_PATH = SHARED_DIR / "ready.json"
+    COLOR_PATH = SHARED_DIR / "color.png"
+    DEPTH_PATH = SHARED_DIR / "depth.npy"
+    META_PATH = SHARED_DIR / "meta.json"
+
+    POLL_INTERVAL_SEC = 0.1
+    TIMEOUT_SEC = 10.0
+
+    aruco_corners: dict[int, np.ndarray] = {
+    0: np.array([
+        [-0.068,0.271,0.021],
+        [-0.094,0.271,0.021],
+        [-0.094,0.297,0.021],
+        [-0.068,0.297,0.021],
+    ]),
+    1: np.array([
+        [-0.233,0.271,0.021],
+        [-0.259,0.271,0.021],
+        [-0.259,0.297,0.021],
+        [-0.233,0.297,0.021],
+    ]),
+    2: np.array([
+        [-0.233,0.500,0.021],
+        [-0.259,0.500,0.021],
+        [-0.259,0.525,0.021],
+        [-0.233,0.525,0.021],
+    ]),
+    3: np.array([
+        [-0.068,0.500,0.021],
+        [-0.094,0.500,0.021],
+        [-0.094,0.525,0.021],
+        [-0.068,0.525,0.021],
+    ]),
+}
+
+
+    @staticmethod
+    def read_json(path: Path) -> dict[str, Any]:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    @staticmethod
+    def atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
+        tmp_path = path.with_suffix(path.suffix + ".tmp")
+        with open(tmp_path, "w", encoding="utf-8", newline="\n") as f:
+            json.dump(payload, f, indent=2, sort_keys=True)
+            f.flush()
+        tmp_path.replace(path)
+
+    @staticmethod
+    def get_next_request_id() -> int:
+        if ImageCapture.READY_PATH.exists():
+            try:
+                ready = ImageCapture.read_json(ImageCapture.READY_PATH)
+                if isinstance(ready.get("request_id"), int):
+                    return ready["request_id"] + 1
+            except Exception:
+                pass
+
+        if ImageCapture.REQUEST_PATH.exists():
+            try:
+                req = ImageCapture.read_json(ImageCapture.REQUEST_PATH)
+                if isinstance(req.get("request_id"), int):
+                    return req["request_id"] + 1
+            except Exception:
+                pass
+
+        return 1
+
+    @staticmethod
+    def request_capture(timeout_sec: float = TIMEOUT_SEC) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+        ImageCapture.SHARED_DIR.mkdir(parents=True, exist_ok=True)
+
+        request_id = ImageCapture.get_next_request_id()
+
+        if ImageCapture.READY_PATH.exists():
+            ImageCapture.READY_PATH.unlink()
+
+        request_payload = {
+            "request_id": request_id,
+            "capture": True,
+        }
+        ImageCapture.atomic_write_json(ImageCapture.REQUEST_PATH, request_payload)
+
+        deadline = time.monotonic() + timeout_sec
+
+        while time.monotonic() < deadline:
+            if ImageCapture.READY_PATH.exists():
+                try:
+                    ready = ImageCapture.read_json(ImageCapture.READY_PATH)
+                except Exception:
+                    time.sleep(ImageCapture.POLL_INTERVAL_SEC)
+                    continue
+
+                if ready.get("request_id") != request_id:
+                    time.sleep(ImageCapture.POLL_INTERVAL_SEC)
+                    continue
+
+                status = ready.get("status")
+                if status != "ok":
+                    raise RuntimeError(f"Capture failed: {ready}")
+
+                if not ImageCapture.COLOR_PATH.exists():
+                    raise FileNotFoundError(f"Missing file: {ImageCapture.COLOR_PATH}")
+                if not ImageCapture.DEPTH_PATH.exists():
+                    raise FileNotFoundError(f"Missing file: {ImageCapture.DEPTH_PATH}")
+                if not ImageCapture.META_PATH.exists():
+                    raise FileNotFoundError(f"Missing file: {ImageCapture.META_PATH}")
+
+                color = cv2.imread(str(ImageCapture.COLOR_PATH), cv2.IMREAD_COLOR)
+                if color is None:
+                    raise RuntimeError(f"Failed to load color image from {ImageCapture.COLOR_PATH}")
+
+                depth = np.load(str(ImageCapture.DEPTH_PATH))
+                meta = ImageCapture.read_json(ImageCapture.META_PATH)
+
+                return color, depth, meta
+
+            time.sleep(ImageCapture.POLL_INTERVAL_SEC)
+
+        raise TimeoutError(f"Timed out waiting for capture response after {timeout_sec} seconds")
+    
+    @staticmethod
+    def removePerspective(rgbImg):
+        # Load the predefined dictionary where our markers are printed from
+        dictionary = aruco.getPredefinedDictionary(aruco.DICT_6X6_250)
+
+        # Load the default detector parameters
+        detector_params = aruco.DetectorParameters()
+
+        # Create an ArucoDetector using the dictionary and detector parameters
+        detector = aruco.ArucoDetector(dictionary, detector_params)
+
+        corners, ids, rejected = detector.detectMarkers(rgbImg)
+
+        # Sort corners based on id
+        ids = ids.flatten()
+        #print(ids)
+
+        # Sort the corners based on the ids
+        corners = np.array([corners[i] for i in np.argsort(ids)])
+        # print(corners.shape)
+
+        # Remove dimensions of size 1
+        corners = np.squeeze(corners)
+        # print(corners)
+
+        # Sort the ids
+        ids = np.sort(ids)
+
+        # Extract source points corresponding to the exterior bounding box corners of the 4 markers
+        src_pts = np.array([corners[0][0], corners[1][1], corners[2][2], corners[3][3]], dtype='float32')
+        # print(src_pts)
+
+        width = 10      # inches
+        height = 7.5    # inches
+        ppi = 96        # pixels per inch (standard resolution for most screens - can be any arbitrary value that still preserves information)
+        dst_pts = np.array([[0, 0], [0, height*ppi], [width*ppi, height*ppi], [width*ppi, 0]], dtype='float32')
+        # print(dst_pts)
+
+        # Compute the perspective transformation matrix
+        M = cv2.getPerspectiveTransform(src_pts, dst_pts)
+        # print(M)
+
+        # Apply the perspective transformation to the input image
+        # print(rgbImg.shape[1])
+        corrected_img = cv2.warpPerspective(rgbImg, M, (rgbImg.shape[1], rgbImg.shape[0]))
+
+        # Crop the output image to the specified dimensions
+        corrected_img = corrected_img[:int(height*ppi), :int(width*ppi)]
+
+        # plt.imshow(cv2.cvtColor(corrected_img, cv2.COLOR_BGR2RGB))
+        # plt.title('Perspective corrected image')
+        # plt.gca().invert_xaxis()
+        # plt.show()
+
+        return corrected_img
+
+    @staticmethod
+    def getClusterCords(flatImg):
+        # Run k-means clustering on the image
+
+        # Reshape our image data to a flattened list of RGB values
+        img_data = flatImg.reshape((-1, 3))
+        img_data = np.float32(img_data)
+
+        # Define the number of clusters
+        k = 3 #black codes, white background, brown blocks
+
+        # Define the criteria for the k-means algorithm
+        # This is a tuple with three elements: (type of termination criteria, maximum number of iterations, epsilon/required accuracy)
+        criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
+
+        # Run the k-means algorithm
+        # Parameters: data, number of clusters, best labels, criteria, number of attempts, initial centers
+        _, labels, centers = cv2.kmeans(img_data, k, None, criteria, 10, cv2.KMEANS_RANDOM_CENTERS)
+
+        # The output of the k-means algorithm gives the centers as floating point values
+        # We need to convert these back to uint8 to be able to use them as pixel values
+        centers = np.uint8(centers)
+
+        # Rebuild the image using the labels and centers
+        kmeans_data = centers[labels.flatten()]
+        kmeans_img = kmeans_data.reshape(flatImg.shape)
+        labels = labels.reshape(flatImg.shape[:2])
+
+        # Identify the cluster that is closest to the dark green color
+        block_brown = np.array([88, 106, 121])
+        distances = np.linalg.norm(centers - block_brown, axis=1)
+        block_cluster_label = np.argmin(distances)
+
+        # Create a mask image for this label
+        # All pixels that belong to this cluster will be white, and all others will be black
+        mask_img = np.zeros(kmeans_img.shape[:2], dtype='uint8')
+        mask_img[labels == block_cluster_label] = 255
+
+        # Segment continuous regions
+        # Parameters: input image, contour retrieval mode, contour approximation method
+        contours, _ = cv2.findContours(mask_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+
+        # Visualize the contours
+        # Parameters for drawContours: input image, contours, contour index (-1 means all contours), color, thickness
+        contour_img = flatImg.copy()
+        cv2.drawContours(contour_img, contours, -1, (0, 255, 0), 3)
+
+        # Get area of each region
+        areas = [cv2.contourArea(contour) for contour in contours]
+        # print(f'Area of each region: {areas}')
+
+        # Calculate the expected pixel area
+        ppi_2 = 120
+        expected_area = (1.9685 * 0.905512) * (ppi_2**2)
+        area_tolerance = expected_area * 0.4
+        # print(f'expected_area: {expected_area}')
+
+        # Find the contour with the closest area to the expected area
+        sorted_area_diff = np.sort(np.abs(np.array(areas) - expected_area))
+        block_indices = np.where(np.abs(np.array(areas) - expected_area) < area_tolerance)[0]
+
+        # print(block_indices)
+
+        u_c = np.zeros(len(block_indices))
+        v_c = np.zeros(len(block_indices))
+        angle = np.zeros(len(block_indices))
+        for index, i in enumerate(block_indices):
+            selected_contour = contours[block_indices[index]]
+            # x, y, w, h = cv2.boundingRect(selected_contour)
+            # u_c[index] = x + w//2
+            # v_c[index] = y + h//2
+
+            moments = cv2.moments(selected_contour)
+            u_c[index] = int(moments['m10']/moments['m00'])
+            v_c[index] = int(moments['m01']/moments['m00'])
+
+            rect = cv2.minAreaRect(selected_contour) # minAreaRect returns a Box2D structure. A Box2D structure is a tuple of ((x, y), (w, h), angle).
+            angle[index] = rect[2]
+
+
+        for i in range (len(block_indices)):
+            print(f'x: {u_c[i]}, y: {v_c[i]}, angle: {angle[i]}')
+
+        # Draw the center of the selected contour
+        center_img = flatImg.copy()
+        for i in range(len(u_c)):    
+            cv2.circle(center_img, (int(u_c[i]), int(v_c[i])), 5, (255, 255, 0), -1)
+
+        plt.imshow(cv2.cvtColor(center_img, cv2.COLOR_BGR2RGB))
+        plt.title(f'Center of the selected contour for label {block_cluster_label}')
+        plt.gca().invert_yaxis()
+        plt.show()
+
+        aruco_origin_x = ImageCapture.aruco_corners[0][0][0]
+        aruco_origin_y = ImageCapture.aruco_corers[0][0][1]
+        u_c_m = u_c / ppi_2 * (25.4 / 1000)
+        v_c_m = v_c / ppi_2 * (25.4 / 1000)
+
+        # HERE - if the tags are angled, this needs to be modified
+        work_x = aruco_origin_x - v_c_m
+        work_y = aruco_origin_y + u_c_m
+        angle = angle - 90
+
+        return work_x, work_y, angle
 
 class EGMClient(Node):
     def __init__(self):
@@ -319,29 +613,120 @@ class EGMClient(Node):
         time.sleep(2.0)
         return True
     
-def moveArm(pos, quart, node):
-    arm_traj = node.plan_arm_to_pose_constraints(
-            group_name="arm",
-            link_name="gripper_tcp_calibrated",
-            frame_id="world",
-            goal_xyz=(pos[0], pos[1], pos[2]),
-            goal_quat_wxyz=(quart[0], quart[1], quart[2], quart[3]),
-    )
-    if arm_traj is not None:
-        node.execute_moveit_trajectory(arm_traj)
-    
-def setGripperOpen(node, open):
-    if open:
-        node.send_gripper_command(
-            position=0.00,
-            max_velocity=0.05,
-        )
-    else:
-        node.send_gripper_command(
-            position=0.01,
-            max_velocity=0.05,
-        )
 
+
+class Helpers:
+    @staticmethod
+    def euler_angles_to_quarternion(euler_angles: np.ndarray) -> np.ndarray:
+        """
+        Convert Euler angles to a 3x3 rotation matrix using an intrinsic z-y'-x" convention.
+
+        Parameters
+        ----------
+        euler_angles : np.ndarray
+            Array of shape (3,) containing [yaw, pitch, roll] in degrees.
+
+        Returns
+        -------
+        np.ndarray
+            3x3 rotation matrix.
+
+        """
+        matrix = None
+
+        # ================================== YOUR CODE HERE ==================================
+
+        yaw = np.deg2rad(euler_angles[0])
+        pitch = np.deg2rad(euler_angles[1])
+        roll = np.deg2rad(euler_angles[2])
+        R_z = np.array([[np.cos(yaw), -np.sin(yaw), 0], [np.sin(yaw), np.cos(yaw), 0], [0, 0, 1]])
+        R_y = np.array([[np.cos(pitch), 0, np.sin(pitch)], [0, 1, 0], [-np.sin(pitch), 0, np.cos(pitch)]])
+        R_x = np.array([[1, 0, 0], [0, np.cos(roll), -np.sin(roll)], [0, np.sin(roll), np.cos(roll)]])
+
+        matrix = R_z @ R_y @ R_x
+
+        # ====================================================================================
+
+        """
+        Convert a 3x3 rotation matrix to a unit quaternion.
+
+        Parameters
+        ----------
+        matrix : np.ndarray
+            3x3 rotation matrix.
+
+        Returns
+        -------
+        np.ndarray
+            Array of shape (4,) containing [w, x, y, z] where w is the scalar part.
+
+        """
+        quaternion = None
+
+        # ================================== YOUR CODE HERE ==================================
+
+        M00 = np.trace(matrix)
+        M11 = matrix[0, 0]
+        M22 = matrix[1, 1]
+        M33 = matrix[2, 2]
+        M = np.array([M00, M11, M22, M33])
+
+        p = np.zeros(4)
+
+        i = np.argmax(M)
+        if i == 0:
+            p[0] = np.sqrt(1 + M00)
+            p[1] = (matrix[2, 1] - matrix[1, 2]) / p[0]
+            p[2] = (matrix[0, 2] - matrix[2, 0]) / p[0]
+            p[3] = (matrix[1, 0] - matrix[0, 1]) / p[0]
+        elif i == 1:
+            p[1] = np.sqrt(1 + 2*M11 - M00)
+            p[0] = (matrix[2, 1] - matrix[1, 2]) / p[1]
+            p[2] = (matrix[1, 0] + matrix[0, 1]) / p[1]
+            p[3] = (matrix[0, 2] + matrix[2, 0]) / p[1]
+        elif i == 2:
+            p[2] = np.sqrt(1 + 2*M22 - M00)
+            p[0] = (matrix[0, 2] - matrix[2, 0]) / p[2]
+            p[1] = (matrix[1, 0] + matrix[0, 1]) / p[2]
+            p[3] = (matrix[2, 1] + matrix[1, 2]) / p[2]
+        else:
+            p[3] = np.sqrt(1 + 2*M33 - M00)
+            p[0] = (matrix[1, 0] - matrix[0, 1]) / p[3]
+            p[1] = (matrix[0, 2] + matrix[2, 0]) / p[3]
+            p[2] = (matrix[2, 1] + matrix[1, 2]) / p[3]
+
+        quaternion = 0.5 * p
+        if(quaternion[0] < 0):
+            quaternion = -quaternion
+
+        # ====================================================================================
+
+        return quaternion
+    
+    @staticmethod
+    def moveArm(pos, quart, node):
+        arm_traj = node.plan_arm_to_pose_constraints(
+                group_name="arm",
+                link_name="gripper_tcp_calibrated",
+                frame_id="world",
+                goal_xyz=(pos[0], pos[1], pos[2]),
+                goal_quat_wxyz=(quart[0], quart[1], quart[2], quart[3]),
+        )
+        if arm_traj is not None:
+            node.execute_moveit_trajectory(arm_traj)
+        
+    @staticmethod
+    def setGripperOpen(node, open):
+        if open:
+            node.send_gripper_command(
+                position=0.00,
+                max_velocity=0.05,
+            )
+        else:
+            node.send_gripper_command(
+                position=0.01,
+                max_velocity=0.05,
+            )
 
 def main():
     rclpy.init()
@@ -355,12 +740,15 @@ def main():
         max_velocity=0.05,
     )
 
+
     a = 0.70717
     b = 0.92388
     c = 0.38268
 
-    tower_x = 0.419
-    tower_y = 0.221
+    # tower_x = 0.419
+    # tower_y = 0.221
+    tower_x = 0.24
+    tower_y = 0.445
     parallel_dx = 0.043
     parallel_dy = 0.043
     diagonal_dx = 0.043 * 0.707
@@ -381,7 +769,8 @@ def main():
     num_y_blocks = 5
 
 
-    tower_block_points = [
+    #Get coordinates of tower block
+    tower_block_array = [
         [[tower_x+parallel_dx, tower_y, base_z], [0.0, a, a, 0.0]],
         [[tower_x, tower_y+parallel_dy, base_z], [0.0, 1.0, 0.0, 0.0]],
         [[tower_x-parallel_dx, tower_y, base_z], [0.0, a, a, 0.0]],
@@ -392,27 +781,40 @@ def main():
         [[tower_x+diagonal_dx, tower_y-diagonal_dy, base_z+dz], [0.0, b, c, 0.0]],
     ]
 
-
-    #Get coordinates of tower block
-    temp_tower_block_array = [
-        [[0, 0, 0], [0, 1.0, 0, 0]], 
-        [[0, 0, 0], [0, 1.0, 0, 0]], 
-        [[0, 0, 0], [0, 1.0, 0, 0]]
-    ]
-
-
     #Get coordinates of the available blocks
-    temp_available_block_array = [
-        [[0, 0, 0], [0, 1.0, 0, 0]], 
-        [[0, 0, 0], [0, 1.0, 0, 0]],
-        [[0, 0, 0], [0, 1.0, 0, 0]]
-    ]
+    
+    # color, depth, meta = ImageCapture.request_capture()
+    # img_path = Path(r"C:\Users\alexl\Documents\Python_Scripts\ARC380\ARC380_Team_1\arc380_s26_team_1\realsense_shared\color.png") # TEST DATA
+    # color = cv2.imread(str(img_path), cv2.IMREAD_COLOR) # TEST DATA
 
+    # flatImg = ImageCapture.removePerspective(color)
+    # x_blocks, y_blocks, angle_blocks = ImageCapture.getClusterCords(flatImg)
+
+    x_blocks = [0.0, 0.06, 0.12, 0.18, 0.24, 0.0, 0.06, 0.12, 0.18, 0.24] # TEST DATA
+    y_blocks = [0.480, 0.480, 0.480, 0.480, 0.480, 0.420, 0.420, 0.420, 0.420, 0.420] # TEST DATA
+    angle_blocks = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] # TEST DATA
+
+    z_blocks = np.zeros(len(x_blocks))
+    quarts = np.array([Helpers.euler_angles_to_quarternion([angle, 0, 180]) for angle in angle_blocks])
+
+    scattered_block_array = [[[x, y, z], q] for x, y, z, q in zip(x_blocks, y_blocks, z_blocks, quarts)]
+    # scattered_block_array = [
+    #     [[0.0, 0.480, 0], [0, 1.0, 0, 0]], 
+    #     [[0.06, 0.480, 0], [0, 1.0, 0, 0]],
+    #     [[0.12, 0.480, 0], [0, 1.0, 0, 0]], 
+    #     [[0.18, 0.480, 0], [0, 1.0, 0, 0]], 
+    #     [[0.24, 0.480, 0], [0, 1.0, 0, 0]], 
+    #     [[0.0, 0.420, 0], [0, 1.0, 0, 0]], 
+    #     [[0.06, 0.420, 0], [0, 1.0, 0, 0]], 
+    #     [[0.12, 0.420, 0], [0, 1.0, 0, 0]], 
+    #     [[0.18, 0.420, 0], [0, 1.0, 0, 0]], 
+    #     [[0.24, 0.420, 0], [0, 1.0, 0, 0]], 
+    # ] # TEST DATA
 
     #Get radius of tower, indicies of blocks that are in the tower area
-    tower_positions = np.array([item[0] for item in temp_tower_block_array])
+    tower_positions = np.array([item[0] for item in tower_block_array])
     tower_center = tower_positions.mean(axis=0)
-    print(f'Tower center: {tower_center}')
+    # print(f'Tower center: {tower_center}')
     distances = np.linalg.norm(tower_positions - tower_center, axis=1)
 
     farthest_idx = np.argmax(distances)
@@ -420,124 +822,178 @@ def main():
     farthest_distance = np.max(distances)
 
     r_buffer = 0.1
-    available_positions = np.array([item[0] for item in temp_available_block_array])
+    scattered_pos = np.array([item[0] for item in scattered_block_array])
+    scattered_quart = np.array([item[1] for item  in scattered_block_array])
 
-    available_distances = np.linalg.norm(available_positions - tower_center, axis=1)
-    indices_within_radius = np.where(available_distances <= farthest_distance + r_buffer)[0]
-    print(indices_within_radius)
+    scattered_distances_unsorted = np.linalg.norm(scattered_pos - tower_center, axis=1)
+    sorted_scattered_indices = np.argsort(scattered_distances_unsorted)
+    sorted_scattered_distances = [scattered_distances_unsorted[i] for i in sorted_scattered_indices]
+    sorted_scattered_block_array = [scattered_block_array[i] for i in sorted_scattered_indices]
+
+    indices_within_radius = np.where(sorted_scattered_distances <= farthest_distance + r_buffer)[0]
+    indices_outside_radius = np.where(sorted_scattered_distances > farthest_distance + r_buffer)[0]
+
+    num_blocks_arr = np.ones(len(scattered_pos))
+
+    in_blocks = [sorted_scattered_block_array[i] for i in indices_within_radius]
+    out_blocks = [sorted_scattered_block_array[i] for i in indices_outside_radius]
+    print(in_blocks)
+    print()
+    print(out_blocks)
 
 
     #Clear blocks out of the radius of the tower (Find where to put them)
-    TODO
+    #HERE if no blocks outside radius it dies
+    for index, in_block in enumerate(in_blocks):
+        Helpers.moveArm((in_block[0][0], in_block[0][1], in_block[0][2] + above_block_z), in_block[1]) # Move above in block
+        Helpers.moveArm((in_block[0][0], in_block[0][1], in_block[0][2] + around_block_z), in_block[1]) # Move down
+        Helpers.setGripperOpen(False)
+        Helpers.moveArm((in_block[0][0], in_block[0][1], in_block[0][2] + above_block_z), in_block[1]) # Move up
+
+        out_block_index = index % len(in_blocks)
+
+        Helpers.moveArm((out_blocks[out_block_index][0][0], out_blocks[out_block_index][0][1], out_blocks[out_block_index][0][2] + above_block_z), out_blocks[out_block_index][1]) # Move above out block
+        Helpers.moveArm((out_blocks[out_block_index][0][0], out_blocks[out_block_index][0][1], out_blocks[out_block_index][0][2] + dz * (num_blocks_arr[out_block_index]) + around_block_z + drop_clearance_z), out_blocks[out_block_index][1]) # Move down
+        Helpers.setGripperOpen(True)
+        Helpers.moveArm((out_blocks[out_block_index][0][0], out_blocks[out_block_index][0][1], out_blocks[out_block_index][0][2] + above_block_z), out_blocks[out_block_index][1]) # Move above out block
+
+        num_blocks_arr[out_block_index] += 1
+
 
     #Get coordinates of the available blocks, loop back if still in radius of tower
-    TODO
+    #HERE can maybe do later
+
+
     
     #Grab starting from closest blocks
-    available_positions = np.array([item[0] for item in temp_available_block_array])
-    available_distances = np.linalg.norm(available_positions - tower_center, axis=1)
-
-    sorted_indices = np.argsort(distances)
-
-    sorted_available_blocks = [temp_available_block_array[i] for i in sorted_indices]
-    print(sorted_available_blocks)
-
     #Move to tower
     #Move with gripper always above height of tower by a bit
     #Repeat until tower is built
 
 
+    #HERE can do more stuff with order of placement within a layer
+    tower_block_num = 0
+    done = False
+    for index, block in enumerate(out_blocks):
+        if done:
+            break
 
-    index = 0
-    for point, angle in tower_block_points:
-        num_block_x = index % num_y_blocks
-        num_block_y = int(index / num_y_blocks)
+        block_pos = block[0]
+        block_quart = block[1]
+        tower_block_pos = tower_block_array[tower_block_num][0]
+        tower_block_quart = tower_block_array[tower_block_num][1]
+        for i in range(0, num_blocks_arr[index]):
+            height = num_blocks_arr[index] - i - 1
+            Helpers.moveArm((block_pos[0], block_pos[1], block_pos[2] + height * dz + above_block_z), block_quart) # Move above block
+            Helpers.moveArm((block_pos[0], block_pos[1], block_pos[2] + height * dz + above_block_z), block_quart) # Move down to block
+            Helpers.setGripperOpen(False)
+            Helpers.moveArm((block_pos[0], block_pos[1], block_pos[2] + height * dz + above_block_z), block_quart) # Move up from block
 
-        #Open gripper
-        node.send_gripper_command(
-            position=gripper_open,
-            max_velocity=0.05,
-        )
+            Helpers.moveArm((tower_block_pos[0], tower_block_pos[1], tower_block_pos[2] + above_block_z), tower_block_quart) # Move above tower block
+            Helpers.moveArm((tower_block_pos[0], tower_block_pos[1], tower_block_pos[2] + around_block_z + drop_clearance_z), tower_block_quart) # Move to tower block pos
+            Helpers.setGripperOpen(True)
+            Helpers.moveArm((tower_block_pos[0], tower_block_pos[1], tower_block_pos[2] + above_block_z), tower_block_quart) # Move above tower block
 
-        #Move to above block
-        arm_traj = node.plan_arm_to_pose_constraints(
-            group_name="arm",
-            link_name="gripper_tcp_calibrated",
-            frame_id="world",
-            goal_xyz=(num_block_x*holder_dx, first_block_y - num_block_y*holder_dy, above_block_z),
-            goal_quat_wxyz=(0.0, 1.0, 0.0, 0.0),
-        )
-        if arm_traj is not None:
-            node.execute_moveit_trajectory(arm_traj)
+            tower_block_num += 1
 
-        #Move down
-        arm_traj = node.plan_arm_to_pose_constraints(
-            group_name="arm",
-            link_name="gripper_tcp_calibrated",
-            frame_id="world",
-            goal_xyz=(num_block_x*holder_dx, first_block_y - num_block_y*holder_dy, around_block_z),
-            goal_quat_wxyz=(0.0, 1.0, 0.0, 0.0),
-        )
-        if arm_traj is not None:
-            node.execute_moveit_trajectory(arm_traj)
+            if tower_block_num > len(tower_block_array):
+                done = True
+                break
 
-        #Grab block
-        node.send_gripper_command(
-            position=gripper_closed,
-            max_velocity=0.05,
-        )
 
-        #Move up
-        arm_traj = node.plan_arm_to_pose_constraints(
-            group_name="arm",
-            link_name="gripper_tcp_calibrated",
-            frame_id="world",
-            goal_xyz=(num_block_x*holder_dx, first_block_y - num_block_y*holder_dy, above_block_z),
-            goal_quat_wxyz=(0.0, 1.0, 0.0, 0.0),
-        )
-        if arm_traj is not None:
-            node.execute_moveit_trajectory(arm_traj)
 
-        #Move to above block's placement point
-        arm_traj = node.plan_arm_to_pose_constraints(
-            group_name="arm",
-            link_name="gripper_tcp_calibrated",
-            frame_id="world",
-            goal_xyz=(point[0], point[1], point[2] + around_block_z + large_clearance_z),
-            goal_quat_wxyz=(angle[0], angle[1], angle[2], angle[3]),
-        )
-        if arm_traj is not None:
-            node.execute_moveit_trajectory(arm_traj)
+###########################################
 
-        #Move down
-        arm_traj = node.plan_arm_to_pose_constraints(
-            group_name="arm",
-            link_name="gripper_tcp_calibrated",
-            frame_id="world",
-            goal_xyz=(point[0], point[1], point[2] + around_block_z + drop_clearance_z),
-            goal_quat_wxyz=(angle[0], angle[1], angle[2], angle[3]),
-        )
-        if arm_traj is not None:
-            node.execute_moveit_trajectory(arm_traj)
+    # index = 0
+    # for point, angle in tower_block_points:
+    #     num_block_x = index % num_y_blocks
+    #     num_block_y = int(index / num_y_blocks)
 
-        #Drop block
-        node.send_gripper_command(
-            position=gripper_open,
-            max_velocity=0.05,
-        )
+    #     #Open gripper
+    #     node.send_gripper_command(
+    #         position=gripper_open,
+    #         max_velocity=0.05,
+    #     )
 
-        #Move Up
-        arm_traj = node.plan_arm_to_pose_constraints(
-            group_name="arm",
-            link_name="gripper_tcp_calibrated",
-            frame_id="world",
-            goal_xyz=(point[0], point[1], point[2] + around_block_z + large_clearance_z),
-            goal_quat_wxyz=(angle[0], angle[1], angle[2], angle[3]),
-        )
-        if arm_traj is not None:
-            node.execute_moveit_trajectory(arm_traj)
+    #     #Move to above block
+    #     arm_traj = node.plan_arm_to_pose_constraints(
+    #         group_name="arm",
+    #         link_name="gripper_tcp_calibrated",
+    #         frame_id="world",
+    #         goal_xyz=(num_block_x*holder_dx, first_block_y - num_block_y*holder_dy, above_block_z),
+    #         goal_quat_wxyz=(0.0, 1.0, 0.0, 0.0),
+    #     )
+    #     if arm_traj is not None:
+    #         node.execute_moveit_trajectory(arm_traj)
 
-        index += 1
+    #     #Move down
+    #     arm_traj = node.plan_arm_to_pose_constraints(
+    #         group_name="arm",
+    #         link_name="gripper_tcp_calibrated",
+    #         frame_id="world",
+    #         goal_xyz=(num_block_x*holder_dx, first_block_y - num_block_y*holder_dy, around_block_z),
+    #         goal_quat_wxyz=(0.0, 1.0, 0.0, 0.0),
+    #     )
+    #     if arm_traj is not None:
+    #         node.execute_moveit_trajectory(arm_traj)
+
+    #     #Grab block
+    #     node.send_gripper_command(
+    #         position=gripper_closed,
+    #         max_velocity=0.05,
+    #     )
+
+    #     #Move up
+    #     arm_traj = node.plan_arm_to_pose_constraints(
+    #         group_name="arm",
+    #         link_name="gripper_tcp_calibrated",
+    #         frame_id="world",
+    #         goal_xyz=(num_block_x*holder_dx, first_block_y - num_block_y*holder_dy, above_block_z),
+    #         goal_quat_wxyz=(0.0, 1.0, 0.0, 0.0),
+    #     )
+    #     if arm_traj is not None:
+    #         node.execute_moveit_trajectory(arm_traj)
+
+    #     #Move to above block's placement point
+    #     arm_traj = node.plan_arm_to_pose_constraints(
+    #         group_name="arm",
+    #         link_name="gripper_tcp_calibrated",
+    #         frame_id="world",
+    #         goal_xyz=(point[0], point[1], point[2] + around_block_z + large_clearance_z),
+    #         goal_quat_wxyz=(angle[0], angle[1], angle[2], angle[3]),
+    #     )
+    #     if arm_traj is not None:
+    #         node.execute_moveit_trajectory(arm_traj)
+
+    #     #Move down
+    #     arm_traj = node.plan_arm_to_pose_constraints(
+    #         group_name="arm",
+    #         link_name="gripper_tcp_calibrated",
+    #         frame_id="world",
+    #         goal_xyz=(point[0], point[1], point[2] + around_block_z + drop_clearance_z),
+    #         goal_quat_wxyz=(angle[0], angle[1], angle[2], angle[3]),
+    #     )
+    #     if arm_traj is not None:
+    #         node.execute_moveit_trajectory(arm_traj)
+
+    #     #Drop block
+    #     node.send_gripper_command(
+    #         position=gripper_open,
+    #         max_velocity=0.05,
+    #     )
+
+    #     #Move Up
+    #     arm_traj = node.plan_arm_to_pose_constraints(
+    #         group_name="arm",
+    #         link_name="gripper_tcp_calibrated",
+    #         frame_id="world",
+    #         goal_xyz=(point[0], point[1], point[2] + around_block_z + large_clearance_z),
+    #         goal_quat_wxyz=(angle[0], angle[1], angle[2], angle[3]),
+    #     )
+    #     if arm_traj is not None:
+    #         node.execute_moveit_trajectory(arm_traj)
+
+    #     index += 1
 
     node.destroy_node()
     rclpy.shutdown()

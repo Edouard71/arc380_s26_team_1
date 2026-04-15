@@ -39,6 +39,8 @@ class TrajExecutionState:
     last_setpoint: list[float] = field(default_factory=list)
     done_event: Event = field(default_factory=Event)
     cancelled: bool = False
+    traj_elapsed: float = 0.0   # seconds of active (un-paused) trajectory time accumulated
+    last_tick: float = 0.0      # monotonic time of the last EGM packet, used to compute dt
 
     def reset(self):
         self.points.clear()
@@ -47,12 +49,11 @@ class TrajExecutionState:
         self.last_setpoint.clear()
         self.done_event.clear()
         self.cancelled = False
+        self.traj_elapsed = 0.0
+        self.last_tick = 0.0
 
 
 class EGMController(Node):
-    # The robot must be within this total error norm (radians, across all trajectory joints)
-    # before the controller advances to the next waypoint.
-    _CONVERGENCE_TOLERANCE = 0.01  # radians
 
     # region Initialization
 
@@ -188,6 +189,10 @@ class EGMController(Node):
             if not self.egm_connected:
                 self.egm_connected = True
                 self.get_logger().info(f"EGM connection established with {addr}")
+                # Reset the trajectory tick so the gap while disconnected is not
+                # counted as active trajectory time (avoids skipping waypoints on resume).
+                with self._traj_lock:
+                    self._traj_state.last_tick = 0.0
 
             egm_robot_msg = egm.EgmRobot()
             egm_robot_msg.ParseFromString(data)
@@ -291,16 +296,22 @@ class EGMController(Node):
             for i, traj_i in enumerate(self._traj_state.joint_indices):
                 setpoint[traj_i] = target[i]
 
-            # Advance to the next waypoint once the robot has converged to this one.
-            err_sq = sum(
-                (target[i] - actual[traj_i]) ** 2
-                for i, traj_i in enumerate(self._traj_state.joint_indices)
-            )
-            converged = math.sqrt(err_sq) <= self._CONVERGENCE_TOLERANCE
+            # Advance the trajectory clock only while EGM packets are arriving.
+            # This means pauses (teach pendant enable released, EGM disconnect) freeze
+            # the clock so the robot resumes from the correct waypoint rather than
+            # jumping ahead to wherever wall-clock time would have placed it.
+            now = time.monotonic()
+            if self._traj_state.last_tick > 0.0:
+                self._traj_state.traj_elapsed += now - self._traj_state.last_tick
+            self._traj_state.last_tick = now
+
+            point = self._traj_state.points[seg]
+            scheduled_time = point.time_from_start.sec + point.time_from_start.nanosec * 1e-9
+            due = self._traj_state.traj_elapsed >= scheduled_time
 
             with self._traj_lock:
                 self._traj_state.last_setpoint = setpoint
-                if converged:
+                if due:
                     if seg < len(self._traj_state.points) - 1:
                         self._traj_state.segment += 1
                     else:
@@ -380,13 +391,9 @@ class EGMController(Node):
             self._traj_state.joint_indices = joint_indices
 
         self.state = ControllerState.TRAJECTORY
-        self.get_logger().info(
-            f"Executing trajectory: {len(trajectory.points)} waypoints, "
-            f"convergence tol {self._CONVERGENCE_TOLERANCE} rad"
-        )
+        self.get_logger().info(f"Executing trajectory: {len(trajectory.points)} waypoints")
 
         feedback = ExecuteTrajectory.Feedback()
-        start_time = time.monotonic()
 
         while rclpy.ok():
             if goal_handle.is_cancel_requested:
@@ -410,8 +417,7 @@ class EGMController(Node):
             with self._traj_lock:
                 seg = self._traj_state.segment
                 desired_all = self._traj_state.last_setpoint
-
-            elapsed = time.monotonic() - start_time
+                elapsed = self._traj_state.traj_elapsed
             feedback.elapsed_time = Duration(
                 sec=int(elapsed),
                 nanosec=int((elapsed - int(elapsed)) * 1e9),

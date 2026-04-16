@@ -611,9 +611,6 @@ def main():
 
         index += 1
 
-
-
-
     # # Move arm to above first block
     # arm_traj = node.plan_arm_to_pose_constraints(
     #     group_name="arm",

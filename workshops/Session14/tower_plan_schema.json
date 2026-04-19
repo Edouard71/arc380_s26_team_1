@@ -1,0 +1,77 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "feasible": {
+      "type": "boolean"
+    },
+    "tower_center": {
+      "type": "array",
+      "items": { "type": "number" },
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "blocks_used": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "ordering": {
+      "type": "string",
+      "enum": ["lowest_to_highest"]
+    },
+    "blocks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "block_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "level": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "goal_position": {
+            "type": "array",
+            "items": { "type": "number" },
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "goal_quaternion_wxyz": {
+            "type": "array",
+            "items": { "type": "number" },
+            "minItems": 4,
+            "maxItems": 4
+          },
+          "yaw_degrees": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "block_id",
+          "level",
+          "goal_position",
+          "goal_quaternion_wxyz",
+          "yaw_degrees"
+        ]
+      }
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "feasible",
+    "tower_center",
+    "blocks_used",
+    "ordering",
+    "blocks",
+    "errors"
+  ]
+}

@@ -1,6 +1,9 @@
 from typing import Optional
 
 import rclpy
+
+from generate_tower_plan import generate_tower_plan
+
 from rclpy.node import Node
 from rclpy.action import ActionClient
 from rclpy.parameter import Parameter
@@ -436,6 +439,25 @@ class PlanAndExecuteClient(Node):
 
         return True
 
+# New Helper function to translte plan json to tower_block_points  array
+def plan_to_tower_block_points(plan):
+    tower_block_points = []
+
+    if "blocks" not in plan:
+        raise ValueError("Plan missing 'blocks' field / Malgeneration")
+
+    for block in plan["blocks"]:
+        pos = block["goal_position"]
+        quat = block["goal_quaternion_wxyz"]
+
+        if len(pos) != 3:
+            raise ValueError(f"Invalid goal_position: {pos}")
+        if len(quat) != 4:
+            raise ValueError(f"Invalid quaternion: {quat}")
+
+        tower_block_points.append([pos, quat])
+
+    return tower_block_points
 
 def main():
     rclpy.init()
@@ -474,17 +496,29 @@ def main():
     # num_x_blocks = 4
     num_y_blocks = 5
 
+    # Perception Component Would Grab Quantity & Position Of Blocks 
+    quantity_blocks_available = 8
 
-    tower_block_points = [
-        [[tower_x+parallel_dx, tower_y, base_z], [0.0, a, a, 0.0]],
-        [[tower_x, tower_y+parallel_dy, base_z], [0.0, 1.0, 0.0, 0.0]],
-        [[tower_x-parallel_dx, tower_y, base_z], [0.0, a, a, 0.0]],
-        [[tower_x, tower_y-parallel_dy, base_z], [0.0, 1.0, 0.0, 0.0]],
-        [[tower_x+diagonal_dx, tower_y+diagonal_dy, base_z+dz], [0.0, b, -c, 0.0]],
-        [[tower_x-diagonal_dx, tower_y+diagonal_dy, base_z+dz], [0.0, b, c, 0.0]],
-        [[tower_x-diagonal_dx, tower_y-diagonal_dy, base_z+dz], [0.0, b, -c, 0.0]],
-        [[tower_x+diagonal_dx, tower_y-diagonal_dy, base_z+dz], [0.0, b, c, 0.0]],
-    ]
+    # Invoke GPT 5.4 Model to generate goal coord and goal quat to be stored in tower_block_points variable
+    description_prompt = '''Build a 2-level square tower with 4 blocks per level. 
+                Alternate the orientation of the second level.'''
+
+    plan = generate_tower_plan(
+    tower_description=description_prompt,
+    available_blocks=quantity_blocks_available,
+    tower_center=[tower_x, tower_y, base_z],
+    workspace={
+        "x_min": 0.20,
+        "x_max": 0.55,
+        "y_min": 0.10,
+        "y_max": 0.50,
+        "z_min": 0.00,
+        "z_max": 0.20,
+    },
+    )
+    
+    # Parse Output JSON structure for blocks (Should already be in height ascending order)
+    tower_block_points = plan_to_tower_block_points(plan)
 
     index = 0
     for point, angle in tower_block_points:
@@ -576,9 +610,6 @@ def main():
             node.execute_moveit_trajectory(arm_traj)
 
         index += 1
-
-
-
 
     # # Move arm to above first block
     # arm_traj = node.plan_arm_to_pose_constraints(

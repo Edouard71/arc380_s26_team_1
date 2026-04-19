@@ -22,6 +22,8 @@ from sensor_msgs.msg import JointState
 from shape_msgs.msg import SolidPrimitive
 
 from abb_egm_interfaces.action import ExecuteTrajectory
+from scripts.generate_tower_plan import generate_tower_plan
+
 
 import json
 from pathlib import Path
@@ -1156,6 +1158,26 @@ class Helpers:
                 position=0.01,
                 max_velocity=0.05,
             )
+           
+def plan_to_tower_block_points(plan):
+    tower_block_points = []
+
+    if "blocks" not in plan:
+        raise ValueError("Plan missing 'blocks' field / Malgeneration")
+
+    for block in plan["blocks"]:
+        pos = block["goal_position"]
+        quat = block["goal_quaternion_wxyz"]
+
+        if len(pos) != 3:
+            raise ValueError(f"Invalid goal_position: {pos}")
+        if len(quat) != 4:
+            raise ValueError(f"Invalid quaternion: {quat}")
+
+        tower_block_points.append([pos, quat])
+
+    return tower_block_points
+
 
 def main():
     rclpy.init()
@@ -1201,18 +1223,6 @@ def main():
     num_y_blocks = 5
 
 
-    #Get coordinates of tower block
-    tower_block_array = [
-        [[tower_x+parallel_dx, tower_y, base_z], [0.0, a, a, 0.0]],
-        [[tower_x, tower_y+parallel_dy, base_z], [0.0, 1.0, 0.0, 0.0]],
-        [[tower_x-parallel_dx, tower_y, base_z], [0.0, a, a, 0.0]],
-        [[tower_x, tower_y-parallel_dy, base_z], [0.0, 1.0, 0.0, 0.0]],
-        [[tower_x+diagonal_dx, tower_y+diagonal_dy, base_z+dz], [0.0, b, -c, 0.0]],
-        [[tower_x-diagonal_dx, tower_y+diagonal_dy, base_z+dz], [0.0, b, c, 0.0]],
-        [[tower_x-diagonal_dx, tower_y-diagonal_dy, base_z+dz], [0.0, b, -c, 0.0]],
-        [[tower_x+diagonal_dx, tower_y-diagonal_dy, base_z+dz], [0.0, b, c, 0.0]],
-    ]
-
     #Get coordinates of the available blocks
     
     color, depth, meta = ImageCapture.request_capture()
@@ -1230,21 +1240,36 @@ def main():
     quarts = np.array([Helpers.euler_angles_to_quarternion([angle, 0, 180]) for angle in angle_blocks])
 
     scattered_block_array = [[[x, y, z], q] for x, y, z, q in zip(x_blocks, y_blocks, z_blocks, quarts)]
-    # scattered_block_array = [
-    #     [[0.0, 0.480, 0], [0, 1.0, 0, 0]], 
-    #     [[0.06, 0.480, 0], [0, 1.0, 0, 0]],
-    #     [[0.12, 0.480, 0], [0, 1.0, 0, 0]], 
-    #     [[0.18, 0.480, 0], [0, 1.0, 0, 0]], 
-    #     [[0.24, 0.480, 0], [0, 1.0, 0, 0]], 
-    #     [[0.0, 0.420, 0], [0, 1.0, 0, 0]], 
-    #     [[0.06, 0.420, 0], [0, 1.0, 0, 0]], 
-    #     [[0.12, 0.420, 0], [0, 1.0, 0, 0]], 
-    #     [[0.18, 0.420, 0], [0, 1.0, 0, 0]], 
-    #     [[0.24, 0.420, 0], [0, 1.0, 0, 0]], 
-    # ] # TEST DATA
 
+      #Get coordinates of tower block
+    # Perception Component Would Grab Quantity & Position Of Blocks 
+    quantity_blocks_available = len(scattered_block_array)
+
+    # Invoke GPT 5.4 Model to generate goal coord and goal quat to be stored in tower_block_points variable
+    description_prompt = '''Build a 2-level square tower with 4 blocks per level. 
+                Alternate the orientation of the second level.'''
+
+    plan = generate_tower_plan(
+    tower_description=description_prompt,
+    available_blocks=quantity_blocks_available,
+    tower_center=[tower_x, tower_y, base_z],
+    workspace={
+        "x_min": 0.20,
+        "x_max": 0.55,
+        "y_min": 0.10,
+        "y_max": 0.50,
+        "z_min": 0.00,
+        "z_max": 0.20,
+    },
+    )
+    
+    # Parse Output JSON structure for blocks (Should already be in height ascending order)
+    tower_block_points = plan_to_tower_block_points(plan)
+
+
+    
     #Get radius of tower, indicies of blocks that are in the tower area
-    tower_positions = np.array([item[0] for item in tower_block_array])
+    tower_positions = np.array([item[0] for item in tower_block_points])
     tower_center = tower_positions.mean(axis=0)
     # print(f'Tower center: {tower_center}')
     distances = np.linalg.norm(tower_positions - tower_center, axis=1)
@@ -1309,8 +1334,8 @@ def main():
         block_pos = block[0]
         block_quart = block[1]
         for i in range(0, int(num_blocks_arr[index])):
-            tower_block_pos = tower_block_array[tower_block_num][0]
-            tower_block_quart = tower_block_array[tower_block_num][1]
+            tower_block_pos = tower_block_points[tower_block_num][0]
+            tower_block_quart = tower_block_points[tower_block_num][1]
             height = num_blocks_arr[index] - i - 1
             # print(block_pos[2] + height * dz + around_block_z)
             # print(height)
@@ -1326,7 +1351,7 @@ def main():
 
             tower_block_num += 1
 
-            if tower_block_num > len(tower_block_array):
+            if tower_block_num > len(tower_block_points):
                 done = True
                 break
 

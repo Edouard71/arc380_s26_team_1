@@ -39,15 +39,15 @@ from cv2 import aruco
 from builtin_interfaces.msg import Duration
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
-from moveit_msgs.action import ExecuteTrajectory
+# from moveit_msgs.action import ExecuteTrajectory
 from control_msgs.action import FollowJointTrajectory, ParallelGripperCommand
 
 
 
 
 class ImageCapture:
-    # SHARED_DIR = Path("/realsense_shared")
-    SHARED_DIR = Path(r"C:\Users\alexl\Documents\Python_Scripts\ARC380\ARC380_Team_1\arc380_s26_team_1\realsense_shared")
+    SHARED_DIR = Path("/realsense_shared")
+    # SHARED_DIR = Path(r"C:\Users\alexl\Documents\Python_Scripts\ARC380\ARC380_Team_1\arc380_s26_team_1\realsense_shared") #sim to real
     REQUEST_PATH = SHARED_DIR / "request.json"
     READY_PATH = SHARED_DIR / "ready.json"
     COLOR_PATH = SHARED_DIR / "color.png"
@@ -279,8 +279,9 @@ class ImageCapture:
         # print(f'Area of each region: {areas}')
 
         # Calculate the expected pixel area
-        ppi_2 = 120
-        expected_area = (1.9685 * 0.905512) * (ppi_2**2)
+        ppi_2 = 96
+        fake_ppi = 120
+        expected_area = (1.9685 * 0.905512) * (fake_ppi**2)
         area_tolerance = expected_area * 0.4
         # print(f'expected_area: {expected_area}')
 
@@ -307,28 +308,35 @@ class ImageCapture:
             angle[index] = rect[2]
 
 
-        for i in range (len(block_indices)):
-            print(f'x: {u_c[i]}, y: {v_c[i]}, angle: {angle[i]}')
+        # for i in range (len(block_indices)):
+        #     print(f'x: {u_c[i]}, y: {v_c[i]}, angle: {angle[i]}')
 
         # Draw the center of the selected contour
         center_img = flatImg.copy()
         for i in range(len(u_c)):    
             cv2.circle(center_img, (int(u_c[i]), int(v_c[i])), 5, (255, 255, 0), -1)
 
-        plt.imshow(cv2.cvtColor(center_img, cv2.COLOR_BGR2RGB))
-        plt.title(f'Center of the selected contour for label {block_cluster_label}')
-        plt.gca().invert_yaxis()
-        plt.show()
+        # plt.imshow(cv2.cvtColor(center_img, cv2.COLOR_BGR2RGB))
+        # plt.title(f'Center of the selected contour for label {block_cluster_label}')
+        # plt.gca().invert_yaxis()
+        # plt.show()
 
         aruco_origin_x = ImageCapture.aruco_corners[0][0][0]
-        aruco_origin_y = ImageCapture.aruco_corers[0][0][1]
+        aruco_origin_y = ImageCapture.aruco_corners[0][0][1]
         u_c_m = u_c / ppi_2 * (25.4 / 1000)
         v_c_m = v_c / ppi_2 * (25.4 / 1000)
+
+        for i in range (len(block_indices)):
+            print(f'x: {u_c_m[i]}, y: {v_c_m[i]}, angle: {angle[i]}')
 
         # HERE - if the tags are angled, this needs to be modified
         work_x = aruco_origin_x - v_c_m
         work_y = aruco_origin_y + u_c_m
-        angle = angle - 90
+        # angle = angle - 90
+
+        # print(work_x)
+        # print(work_y)
+        # print(angle)
 
         return work_x, work_y, angle
 
@@ -1127,8 +1135,8 @@ class Helpers:
     def moveArm(pos, quart, node):
         arm_traj = node.plan_arm_to_pose_constraints(
                 group_name="arm",
-                # link_name="gripper_tcp_calibrated", 
-                link_name="gripper_tcp", # sim to real
+                link_name="gripper_tcp_calibrated", 
+                # link_name="gripper_tcp", # sim to real (For all, comment out this sim to real line for real, comment above for sim)
                 frame_id="world",
                 goal_xyz=(pos[0], pos[1], pos[2]),
                 goal_quat_wxyz=(quart[0], quart[1], quart[2], quart[3]),
@@ -1151,8 +1159,8 @@ class Helpers:
 
 def main():
     rclpy.init()
-    # node = EGMClient()
-    node = PlanAndExecuteClient() #sim to real
+    node = EGMClient()
+    # node = PlanAndExecuteClient() #sim to real
 
     gripper_open = 0.00
     gripper_closed = 0.01
@@ -1179,14 +1187,14 @@ def main():
     base_z = 0
     dz = 0.014
     large_clearance_z = 0.1
-    # drop_clearance_z = 0.001 #was 0.01 -> 0.004 -> 0.001
-    drop_clearance_z = 0.005 #sim to real
+    drop_clearance_z = 0.001 #was 0.01 -> 0.004 -> 0.001
+    # drop_clearance_z = 0.005 #sim to real
 
     first_block_x = 0.0
     first_block_y = 0.480
     above_block_z = 0.1
-    # around_block_z = 0.025 #was 0.032 -> 0.025
-    around_block_z = 0.032 # sim to real
+    around_block_z = 0.025 #was 0.032 -> 0.025
+    # around_block_z = 0.032 # sim to real
     holder_dx = 0.06
     holder_dy = 0.06
     # num_x_blocks = 4
@@ -1207,16 +1215,16 @@ def main():
 
     #Get coordinates of the available blocks
     
-    # color, depth, meta = ImageCapture.request_capture()
+    color, depth, meta = ImageCapture.request_capture()
     # img_path = Path(r"C:\Users\alexl\Documents\Python_Scripts\ARC380\ARC380_Team_1\arc380_s26_team_1\realsense_shared\color.png") # TEST DATA
     # color = cv2.imread(str(img_path), cv2.IMREAD_COLOR) # TEST DATA
 
-    # flatImg = ImageCapture.removePerspective(color)
-    # x_blocks, y_blocks, angle_blocks = ImageCapture.getClusterCords(flatImg)
+    flatImg = ImageCapture.removePerspective(color)
+    x_blocks, y_blocks, angle_blocks = ImageCapture.getClusterCords(flatImg)
 
-    x_blocks = [0.0, 0.06, 0.12, 0.18, 0.24, 0.0, 0.06, 0.12, 0.18, 0.24] # TEST DATA
-    y_blocks = [0.480, 0.480, 0.480, 0.480, 0.480, 0.420, 0.420, 0.420, 0.420, 0.420] # TEST DATA
-    angle_blocks = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] # TEST DATA
+    # x_blocks = [0.0, 0.06, 0.12, 0.18, 0.24, 0.0, 0.06, 0.12, 0.18, 0.24] # TEST DATA sim to real
+    # y_blocks = [0.480, 0.480, 0.480, 0.480, 0.480, 0.420, 0.420, 0.420, 0.420, 0.420] # TEST DATA
+    # angle_blocks = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] # TEST DATA
 
     z_blocks = np.zeros(len(x_blocks))
     quarts = np.array([Helpers.euler_angles_to_quarternion([angle, 0, 180]) for angle in angle_blocks])
@@ -1304,8 +1312,8 @@ def main():
             tower_block_pos = tower_block_array[tower_block_num][0]
             tower_block_quart = tower_block_array[tower_block_num][1]
             height = num_blocks_arr[index] - i - 1
-            print(block_pos[2] + height * dz + around_block_z)
-            print(height)
+            # print(block_pos[2] + height * dz + around_block_z)
+            # print(height)
             Helpers.moveArm((block_pos[0], block_pos[1], block_pos[2] + height * dz + above_block_z), block_quart, node) # Move above block
             Helpers.moveArm((block_pos[0], block_pos[1], block_pos[2] + height * dz + around_block_z), block_quart, node) # Move down to block
             Helpers.setGripperOpen(False, node)

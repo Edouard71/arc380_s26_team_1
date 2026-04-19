@@ -190,9 +190,11 @@ class ImageCapture:
         src_pts = np.array([corners[0][0], corners[1][1], corners[2][2], corners[3][3]], dtype='float32')
         # print(src_pts)
 
-        width = 10      # inches
-        height = 7.5    # inches
-        ppi = 96        # pixels per inch (standard resolution for most screens - can be any arbitrary value that still preserves information)
+        # width = 10      # inches
+        # height = 7.5    # inches old
+        width = 24.05      # inches
+        height = 32.835    # inches ours
+        ppi = 20        # pixels per inch (standard resolution for most screens - can be any arbitrary value that still preserves information)
         dst_pts = np.array([[0, 0], [0, height*ppi], [width*ppi, height*ppi], [width*ppi, 0]], dtype='float32')
         # print(dst_pts)
 
@@ -223,7 +225,7 @@ class ImageCapture:
         img_data = np.float32(img_data)
 
         # Define the number of clusters
-        k = 3 #black codes, white background, brown blocks
+        k = 4 #black codes, white background, brown blocks
 
         # Define the criteria for the k-means algorithm
         # This is a tuple with three elements: (type of termination criteria, maximum number of iterations, epsilon/required accuracy)
@@ -719,15 +721,17 @@ def main():
     # )
 
 
-    # color, depth, meta = ImageCapture.request_capture()
+    color, depth, meta = ImageCapture.request_capture()
 
-    img_path = Path(r"C:\Users\alexl\Documents\Python_Scripts\ARC380\ARC380_Team_1\arc380_s26_team_1\realsense_shared\color.png")
-    color = cv2.imread(str(img_path), cv2.IMREAD_COLOR)
+    # img_path = Path(r"C:\Users\alexl\Documents\Python_Scripts\ARC380\ARC380_Team_1\arc380_s26_team_1\realsense_shared\color.png")
+    # color = cv2.imread(str(img_path), cv2.IMREAD_COLOR)
     
 
     flatImg = ImageCapture.removePerspective(color)
 
     x_blocks, y_blocks, angle_blocks = ImageCapture.getClusterCords(flatImg)
+
+    return
 
     ###########################################
 

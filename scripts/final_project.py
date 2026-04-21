@@ -1566,84 +1566,84 @@ def main():
 
 
     
-# #Get radius of tower, indicies of blocks that are in the tower area
-# tower_positions = np.array([item[0] for item in tower_block_points])
-# tower_center = tower_positions.mean(axis=0)
-# # print(f'Tower center: {tower_center}')
-# distances = np.linalg.norm(tower_positions - tower_center, axis=1)
+    # #Get radius of tower, indicies of blocks that are in the tower area
+    # tower_positions = np.array([item[0] for item in tower_block_points])
+    # tower_center = tower_positions.mean(axis=0)
+    # # print(f'Tower center: {tower_center}')
+    # distances = np.linalg.norm(tower_positions - tower_center, axis=1)
 
-# farthest_idx = np.argmax(distances)
-# farthest_point = tower_positions[farthest_idx]
-# farthest_distance = np.max(distances)
+    # farthest_idx = np.argmax(distances)
+    # farthest_point = tower_positions[farthest_idx]
+    # farthest_distance = np.max(distances)
 
-# r_buffer = 0.1
-# scattered_pos = np.array([item[0] for item in scattered_block_array])
-# scattered_quart = np.array([item[1] for item  in scattered_block_array])
+    # r_buffer = 0.1
+    # scattered_pos = np.array([item[0] for item in scattered_block_array])
+    # scattered_quart = np.array([item[1] for item  in scattered_block_array])
 
-# scattered_distances_unsorted = np.linalg.norm(scattered_pos - tower_center, axis=1)
-# sorted_scattered_indices = np.argsort(scattered_distances_unsorted)
-# sorted_scattered_distances = [scattered_distances_unsorted[i] for i in sorted_scattered_indices]
-# sorted_scattered_block_array = [scattered_block_array[i] for i in sorted_scattered_indices]
+    # scattered_distances_unsorted = np.linalg.norm(scattered_pos - tower_center, axis=1)
+    # sorted_scattered_indices = np.argsort(scattered_distances_unsorted)
+    # sorted_scattered_distances = [scattered_distances_unsorted[i] for i in sorted_scattered_indices]
+    # sorted_scattered_block_array = [scattered_block_array[i] for i in sorted_scattered_indices]
 
-# indices_within_radius = np.where(sorted_scattered_distances <= farthest_distance + r_buffer)[0]
-# indices_outside_radius = np.where(sorted_scattered_distances > farthest_distance + r_buffer)[0]
+    # indices_within_radius = np.where(sorted_scattered_distances <= farthest_distance + r_buffer)[0]
+    # indices_outside_radius = np.where(sorted_scattered_distances > farthest_distance + r_buffer)[0]
 
-# num_blocks_arr = np.ones(len(scattered_pos))
+    # num_blocks_arr = np.ones(len(scattered_pos))
 
-# in_blocks = [sorted_scattered_block_array[i] for i in indices_within_radius]
-# out_blocks = [sorted_scattered_block_array[i] for i in indices_outside_radius]
+    # in_blocks = [sorted_scattered_block_array[i] for i in indices_within_radius]
+    # out_blocks = [sorted_scattered_block_array[i] for i in indices_outside_radius]
 
-# #Clear blocks out of the radius of the tower onto other blocks
-# #HERE if no blocks outside radius it dies
-# for index, in_block in enumerate(in_blocks):
-#     Helpers.moveArm((in_block[0][0], in_block[0][1], in_block[0][2] + above_block_z), in_block[1], node) # Move above in block
-#     Helpers.moveArm((in_block[0][0], in_block[0][1], in_block[0][2] + around_block_z), in_block[1], node) # Move down
-#     Helpers.setGripperOpen(False, node)
-#     Helpers.moveArm((in_block[0][0], in_block[0][1], in_block[0][2] + above_block_z), in_block[1], node) # Move up
+    # #Clear blocks out of the radius of the tower onto other blocks
+    # #HERE if no blocks outside radius it dies
+    # for index, in_block in enumerate(in_blocks):
+    #     Helpers.moveArm((in_block[0][0], in_block[0][1], in_block[0][2] + above_block_z), in_block[1], node) # Move above in block
+    #     Helpers.moveArm((in_block[0][0], in_block[0][1], in_block[0][2] + around_block_z), in_block[1], node) # Move down
+    #     Helpers.setGripperOpen(False, node)
+    #     Helpers.moveArm((in_block[0][0], in_block[0][1], in_block[0][2] + above_block_z), in_block[1], node) # Move up
 
-#     out_block_index = index % len(out_blocks)
+    #     out_block_index = index % len(out_blocks)
 
-#     Helpers.moveArm((out_blocks[out_block_index][0][0], out_blocks[out_block_index][0][1], out_blocks[out_block_index][0][2] + above_block_z), out_blocks[out_block_index][1], node) # Move above out block
-#     Helpers.moveArm((out_blocks[out_block_index][0][0], out_blocks[out_block_index][0][1], out_blocks[out_block_index][0][2] + dz * (num_blocks_arr[out_block_index]) + around_block_z + drop_clearance_z), out_blocks[out_block_index][1], node) # Move down
-#     Helpers.setGripperOpen(True, node)
-#     Helpers.moveArm((out_blocks[out_block_index][0][0], out_blocks[out_block_index][0][1], out_blocks[out_block_index][0][2] + above_block_z), out_blocks[out_block_index][1], node) # Move above out block
+    #     Helpers.moveArm((out_blocks[out_block_index][0][0], out_blocks[out_block_index][0][1], out_blocks[out_block_index][0][2] + above_block_z), out_blocks[out_block_index][1], node) # Move above out block
+    #     Helpers.moveArm((out_blocks[out_block_index][0][0], out_blocks[out_block_index][0][1], out_blocks[out_block_index][0][2] + dz * (num_blocks_arr[out_block_index]) + around_block_z + drop_clearance_z), out_blocks[out_block_index][1], node) # Move down
+    #     Helpers.setGripperOpen(True, node)
+    #     Helpers.moveArm((out_blocks[out_block_index][0][0], out_blocks[out_block_index][0][1], out_blocks[out_block_index][0][2] + above_block_z), out_blocks[out_block_index][1], node) # Move above out block
 
-#     num_blocks_arr[out_block_index] += 1
+    #     num_blocks_arr[out_block_index] += 1
 
-# #HERE can do more stuff with order of placement within a layer
-# tower_block_num = 0
-# done = False
-# for index, block in enumerate(out_blocks):
-#     if done:
-#         break
+    # #HERE can do more stuff with order of placement within a layer
+    # tower_block_num = 0
+    # done = False
+    # for index, block in enumerate(out_blocks):
+    #     if done:
+    #         break
 
-#     block_pos = block[0]
-#     block_quart = block[1]
-#     for i in range(0, int(num_blocks_arr[index])):
-#         tower_block_pos = tower_block_points[tower_block_num][0]
-#         tower_block_quart = tower_block_points[tower_block_num][1]
-#         height = num_blocks_arr[index] - i - 1
-#         # print(block_pos[2] + height * dz + around_block_z)
-#         # print(height)
-#         Helpers.moveArm((block_pos[0], block_pos[1], block_pos[2] + height * dz + above_block_z), block_quart, node) # Move above block
-#         Helpers.moveArm((block_pos[0], block_pos[1], block_pos[2] + height * dz + around_block_z), block_quart, node) # Move down to block
-#         Helpers.setGripperOpen(False, node)
-#         Helpers.moveArm((block_pos[0], block_pos[1], block_pos[2] + height * dz + above_block_z), block_quart, node) # Move up from block
+    #     block_pos = block[0]
+    #     block_quart = block[1]
+    #     for i in range(0, int(num_blocks_arr[index])):
+    #         tower_block_pos = tower_block_points[tower_block_num][0]
+    #         tower_block_quart = tower_block_points[tower_block_num][1]
+    #         height = num_blocks_arr[index] - i - 1
+    #         # print(block_pos[2] + height * dz + around_block_z)
+    #         # print(height)
+    #         Helpers.moveArm((block_pos[0], block_pos[1], block_pos[2] + height * dz + above_block_z), block_quart, node) # Move above block
+    #         Helpers.moveArm((block_pos[0], block_pos[1], block_pos[2] + height * dz + around_block_z), block_quart, node) # Move down to block
+    #         Helpers.setGripperOpen(False, node)
+    #         Helpers.moveArm((block_pos[0], block_pos[1], block_pos[2] + height * dz + above_block_z), block_quart, node) # Move up from block
 
-#         Helpers.moveArm((tower_block_pos[0], tower_block_pos[1], tower_block_pos[2] + above_block_z), tower_block_quart, node) # Move above tower block
-#         Helpers.moveArm((tower_block_pos[0], tower_block_pos[1], tower_block_pos[2] + around_block_z + drop_clearance_z), tower_block_quart, node) # Move to tower block pos
-#         Helpers.setGripperOpen(True, node)
-#         Helpers.moveArm((tower_block_pos[0], tower_block_pos[1], tower_block_pos[2] + above_block_z), tower_block_quart, node) # Move above tower block
+    #         Helpers.moveArm((tower_block_pos[0], tower_block_pos[1], tower_block_pos[2] + above_block_z), tower_block_quart, node) # Move above tower block
+    #         Helpers.moveArm((tower_block_pos[0], tower_block_pos[1], tower_block_pos[2] + around_block_z + drop_clearance_z), tower_block_quart, node) # Move to tower block pos
+    #         Helpers.setGripperOpen(True, node)
+    #         Helpers.moveArm((tower_block_pos[0], tower_block_pos[1], tower_block_pos[2] + above_block_z), tower_block_quart, node) # Move above tower block
 
-#         tower_block_num += 1
+    #         tower_block_num += 1
 
-#         if tower_block_num > len(tower_block_points):
-#             done = True
-#             break
+    #         if tower_block_num > len(tower_block_points):
+    #             done = True
+    #             break
 
 
 
-###########################################
+########################################### OLD CODE BELOW
 
     # index = 0
     # for point, angle in tower_block_points:

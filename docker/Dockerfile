@@ -63,7 +63,8 @@ RUN rosdep init && rosdep update
 
 RUN python3 -m pip install --no-cache-dir --break-system-packages --ignore-installed \
     "protobuf==6.31.1" \
-    "opencv-contrib-python-headless"
+    "opencv-contrib-python-headless" \
+    "openai"
 
 
 FROM base AS workspace

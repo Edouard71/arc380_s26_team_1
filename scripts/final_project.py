@@ -22,7 +22,7 @@ from sensor_msgs.msg import JointState
 from shape_msgs.msg import SolidPrimitive
 
 from abb_egm_interfaces.action import ExecuteTrajectory
-from scripts.generate_tower_plan import generate_tower_plan
+from generate_tower_plan import generate_tower_plan
 
 
 import json
@@ -41,7 +41,7 @@ from cv2 import aruco
 from builtin_interfaces.msg import Duration
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
-# from moveit_msgs.action import ExecuteTrajectory
+# from moveit_msgs.action import ExecuteTrajectory # sim to real, comment other ExecuteTrajectory for sim
 from control_msgs.action import FollowJointTrajectory, ParallelGripperCommand
 
 
@@ -202,13 +202,15 @@ class ImageCapture:
         ids = np.sort(ids)
 
         # Extract source points corresponding to the exterior bounding box corners of the 4 markers
-        src_pts = np.array([corners[0][0], corners[1][1], corners[2][2], corners[3][3]], dtype='float32')
+        src_pts = np.array([corners[3][3], corners[0][0], corners[1][1], corners[2][2]], dtype='float32')
         # print(src_pts)
 
-        width = 10      # inches
-        height = 7.5    # inches
-        ppi = 96        # pixels per inch (standard resolution for most screens - can be any arbitrary value that still preserves information)
-        dst_pts = np.array([[0, 0], [0, height*ppi], [width*ppi, height*ppi], [width*ppi, 0]], dtype='float32')
+        # width = 10      # inches
+        # height = 7.5    # inches old
+        width = 24.05512      # inches
+        height = 32.83465    # inches ours
+        ppi = int(min(1080/width, 1920/height))       # pixels per inch (standard resolution for most screens - can be any arbitrary value that still preserves information)
+        dst_pts = np.array([[0, 0], [0, width*ppi], [height*ppi, width*ppi], [height*ppi, 0]], dtype='float32')
         # print(dst_pts)
 
         # Compute the perspective transformation matrix
@@ -220,7 +222,7 @@ class ImageCapture:
         corrected_img = cv2.warpPerspective(rgbImg, M, (rgbImg.shape[1], rgbImg.shape[0]))
 
         # Crop the output image to the specified dimensions
-        corrected_img = corrected_img[:int(height*ppi), :int(width*ppi)]
+        corrected_img = corrected_img[:int(width*ppi), :int(height*ppi)]
 
         # plt.imshow(cv2.cvtColor(corrected_img, cv2.COLOR_BGR2RGB))
         # plt.title('Perspective corrected image')
@@ -238,7 +240,7 @@ class ImageCapture:
         img_data = np.float32(img_data)
 
         # Define the number of clusters
-        k = 3 #black codes, white background, brown blocks
+        k = 4 #black codes, white background, brown blocks, blue background
 
         # Define the criteria for the k-means algorithm
         # This is a tuple with three elements: (type of termination criteria, maximum number of iterations, epsilon/required accuracy)
@@ -257,8 +259,13 @@ class ImageCapture:
         kmeans_img = kmeans_data.reshape(flatImg.shape)
         labels = labels.reshape(flatImg.shape[:2])
 
-        # Identify the cluster that is closest to the dark green color
-        block_brown = np.array([88, 106, 121])
+        # plt.imshow(cv2.cvtColor(kmeans_img, cv2.COLOR_BGR2RGB))
+        # plt.title(f'Image classification using k-means clustering (k = {k})')
+        # plt.gca().invert_yaxis()
+        # plt.show()
+
+        # Identify the cluster that is closest to brown color
+        block_brown = np.array([123, 159, 186])
         distances = np.linalg.norm(centers - block_brown, axis=1)
         block_cluster_label = np.argmin(distances)
 
@@ -266,6 +273,11 @@ class ImageCapture:
         # All pixels that belong to this cluster will be white, and all others will be black
         mask_img = np.zeros(kmeans_img.shape[:2], dtype='uint8')
         mask_img[labels == block_cluster_label] = 255
+
+        # plt.imshow(mask_img, cmap='gray')
+        # plt.title(f'Mask image for cluster {block_cluster_label} corresponding to dark green')
+        # plt.gca().invert_yaxis()
+        # plt.show()
 
         # Segment continuous regions
         # Parameters: input image, contour retrieval mode, contour approximation method
@@ -281,10 +293,13 @@ class ImageCapture:
         # print(f'Area of each region: {areas}')
 
         # Calculate the expected pixel area
-        ppi_2 = 96
-        fake_ppi = 120
-        expected_area = (1.9685 * 0.905512) * (fake_ppi**2)
-        area_tolerance = expected_area * 0.4
+        # width = 10      # inches
+        # height = 7.5    # inches old
+        width = 24.05512      # inches
+        height = 32.83465    # inches ours
+        ppi_2 = int(min(1080/width, 1920/height))
+        expected_area = (1.9685 * 0.905512) * (ppi_2**2)
+        area_tolerance = expected_area * 0.2
         # print(f'expected_area: {expected_area}')
 
         # Find the contour with the closest area to the expected area
@@ -303,44 +318,222 @@ class ImageCapture:
             # v_c[index] = y + h//2
 
             moments = cv2.moments(selected_contour)
-            u_c[index] = int(moments['m10']/moments['m00'])
-            v_c[index] = int(moments['m01']/moments['m00'])
+            u_c[index] = round(moments['m10']/moments['m00'])
+            v_c[index] = round(moments['m01']/moments['m00'])
 
             rect = cv2.minAreaRect(selected_contour) # minAreaRect returns a Box2D structure. A Box2D structure is a tuple of ((x, y), (w, h), angle).
-            angle[index] = rect[2]
+            if(rect[1][0] > rect[1][1]):
+                angle[index] = ((rect[2] + 90) % 180) - 90
+            else:
+                angle[index] = ((rect[2] + 180) % 180) - 90
+            # print(f'x,y: {rect[0]}, w,h: {rect[1]}')
 
 
-        # for i in range (len(block_indices)):
-        #     print(f'x: {u_c[i]}, y: {v_c[i]}, angle: {angle[i]}')
+        for i in range (len(block_indices)):
+            print(f'x: {u_c[i]}, y: {v_c[i]}, angle: {angle[i]}')
 
         # Draw the center of the selected contour
         center_img = flatImg.copy()
         for i in range(len(u_c)):    
             cv2.circle(center_img, (int(u_c[i]), int(v_c[i])), 5, (255, 255, 0), -1)
 
+        
+        u_c_m = u_c / ppi_2 * (25.4 / 1000)
+        v_c_m = v_c / ppi_2 * (25.4 / 1000)
+        print(f'u_c_m: {u_c_m}')
+        print(f'v_c_m: {v_c_m}')
+
+        aruco_origin_x = 0 # GET MEASUREMENTS FOR THESE
+        aruco_origin_y = 0 # GET MEASUREMENTS FOR THESE
+        aruco_opp_x = height * (25.4 / 1000) # GET MEASUREMENTS FOR THESE
+        aruco_opp_y = width * (25.4 / 1000) # GET MEASUREMENTS FOR THESE
+        real_corner_angle = np.arctan2(aruco_opp_y - aruco_origin_y, aruco_opp_x - aruco_origin_x)
+        ideal_corner_angle = np.arctan2(width, height)
+
+        corner_angle_diff = real_corner_angle - ideal_corner_angle
+        print(corner_angle_diff)
+
+        work_x = aruco_origin_x + (u_c_m * np.cos(corner_angle_diff)) - (v_c_m * np.sin(corner_angle_diff))
+        work_y = aruco_origin_y + (v_c_m * np.cos(corner_angle_diff)) + (u_c_m * np.sin(corner_angle_diff))
+        # angle = angle - 90
+        print(f'work_x: {work_x}')
+        print(f'work_y: {work_y}')
+        
         # plt.imshow(cv2.cvtColor(center_img, cv2.COLOR_BGR2RGB))
         # plt.title(f'Center of the selected contour for label {block_cluster_label}')
         # plt.gca().invert_yaxis()
         # plt.show()
 
-        aruco_origin_x = ImageCapture.aruco_corners[0][0][0]
-        aruco_origin_y = ImageCapture.aruco_corners[0][0][1]
-        u_c_m = u_c / ppi_2 * (25.4 / 1000)
-        v_c_m = v_c / ppi_2 * (25.4 / 1000)
-
-        for i in range (len(block_indices)):
-            print(f'x: {u_c_m[i]}, y: {v_c_m[i]}, angle: {angle[i]}')
-
-        # HERE - if the tags are angled, this needs to be modified
-        work_x = aruco_origin_x - v_c_m
-        work_y = aruco_origin_y + u_c_m
-        # angle = angle - 90
-
-        # print(work_x)
-        # print(work_y)
-        # print(angle)
-
         return work_x, work_y, angle
+    
+    # @staticmethod
+    # def removePerspective(rgbImg):
+    #     # Load the predefined dictionary where our markers are printed from
+    #     dictionary = aruco.getPredefinedDictionary(aruco.DICT_6X6_250)
+
+    #     # Load the default detector parameters
+    #     detector_params = aruco.DetectorParameters()
+
+    #     # Create an ArucoDetector using the dictionary and detector parameters
+    #     detector = aruco.ArucoDetector(dictionary, detector_params)
+
+    #     corners, ids, rejected = detector.detectMarkers(rgbImg)
+
+    #     # Sort corners based on id
+    #     ids = ids.flatten()
+    #     #print(ids)
+
+    #     # Sort the corners based on the ids
+    #     corners = np.array([corners[i] for i in np.argsort(ids)])
+    #     # print(corners.shape)
+
+    #     # Remove dimensions of size 1
+    #     corners = np.squeeze(corners)
+    #     # print(corners)
+
+    #     # Sort the ids
+    #     ids = np.sort(ids)
+
+    #     # Extract source points corresponding to the exterior bounding box corners of the 4 markers
+    #     src_pts = np.array([corners[0][0], corners[1][1], corners[2][2], corners[3][3]], dtype='float32')
+    #     # print(src_pts)
+
+    #     width = 10      # inches
+    #     height = 7.5    # inches
+    #     ppi = 96        # pixels per inch (standard resolution for most screens - can be any arbitrary value that still preserves information)
+    #     dst_pts = np.array([[0, 0], [0, height*ppi], [width*ppi, height*ppi], [width*ppi, 0]], dtype='float32')
+    #     # print(dst_pts)
+
+    #     # Compute the perspective transformation matrix
+    #     M = cv2.getPerspectiveTransform(src_pts, dst_pts)
+    #     # print(M)
+
+    #     # Apply the perspective transformation to the input image
+    #     # print(rgbImg.shape[1])
+    #     corrected_img = cv2.warpPerspective(rgbImg, M, (rgbImg.shape[1], rgbImg.shape[0]))
+
+    #     # Crop the output image to the specified dimensions
+    #     corrected_img = corrected_img[:int(height*ppi), :int(width*ppi)]
+
+    #     # plt.imshow(cv2.cvtColor(corrected_img, cv2.COLOR_BGR2RGB))
+    #     # plt.title('Perspective corrected image')
+    #     # plt.gca().invert_xaxis()
+    #     # plt.show()
+
+    #     return corrected_img
+
+    # @staticmethod
+    # def getClusterCords(flatImg):
+    #     # Run k-means clustering on the image
+
+    #     # Reshape our image data to a flattened list of RGB values
+    #     img_data = flatImg.reshape((-1, 3))
+    #     img_data = np.float32(img_data)
+
+    #     # Define the number of clusters
+    #     k = 3 #black codes, white background, brown blocks
+
+    #     # Define the criteria for the k-means algorithm
+    #     # This is a tuple with three elements: (type of termination criteria, maximum number of iterations, epsilon/required accuracy)
+    #     criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
+
+    #     # Run the k-means algorithm
+    #     # Parameters: data, number of clusters, best labels, criteria, number of attempts, initial centers
+    #     _, labels, centers = cv2.kmeans(img_data, k, None, criteria, 10, cv2.KMEANS_RANDOM_CENTERS)
+
+    #     # The output of the k-means algorithm gives the centers as floating point values
+    #     # We need to convert these back to uint8 to be able to use them as pixel values
+    #     centers = np.uint8(centers)
+
+    #     # Rebuild the image using the labels and centers
+    #     kmeans_data = centers[labels.flatten()]
+    #     kmeans_img = kmeans_data.reshape(flatImg.shape)
+    #     labels = labels.reshape(flatImg.shape[:2])
+
+    #     # Identify the cluster that is closest to the dark green color
+    #     block_brown = np.array([88, 106, 121])
+    #     distances = np.linalg.norm(centers - block_brown, axis=1)
+    #     block_cluster_label = np.argmin(distances)
+
+    #     # Create a mask image for this label
+    #     # All pixels that belong to this cluster will be white, and all others will be black
+    #     mask_img = np.zeros(kmeans_img.shape[:2], dtype='uint8')
+    #     mask_img[labels == block_cluster_label] = 255
+
+    #     # Segment continuous regions
+    #     # Parameters: input image, contour retrieval mode, contour approximation method
+    #     contours, _ = cv2.findContours(mask_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+
+    #     # Visualize the contours
+    #     # Parameters for drawContours: input image, contours, contour index (-1 means all contours), color, thickness
+    #     contour_img = flatImg.copy()
+    #     cv2.drawContours(contour_img, contours, -1, (0, 255, 0), 3)
+
+    #     # Get area of each region
+    #     areas = [cv2.contourArea(contour) for contour in contours]
+    #     # print(f'Area of each region: {areas}')
+
+    #     # Calculate the expected pixel area
+    #     ppi_2 = 96
+    #     fake_ppi = 120
+    #     expected_area = (1.9685 * 0.905512) * (fake_ppi**2)
+    #     area_tolerance = expected_area * 0.4
+    #     # print(f'expected_area: {expected_area}')
+
+    #     # Find the contour with the closest area to the expected area
+    #     sorted_area_diff = np.sort(np.abs(np.array(areas) - expected_area))
+    #     block_indices = np.where(np.abs(np.array(areas) - expected_area) < area_tolerance)[0]
+
+    #     # print(block_indices)
+
+    #     u_c = np.zeros(len(block_indices))
+    #     v_c = np.zeros(len(block_indices))
+    #     angle = np.zeros(len(block_indices))
+    #     for index, i in enumerate(block_indices):
+    #         selected_contour = contours[block_indices[index]]
+    #         # x, y, w, h = cv2.boundingRect(selected_contour)
+    #         # u_c[index] = x + w//2
+    #         # v_c[index] = y + h//2
+
+    #         moments = cv2.moments(selected_contour)
+    #         u_c[index] = int(moments['m10']/moments['m00'])
+    #         v_c[index] = int(moments['m01']/moments['m00'])
+
+    #         rect = cv2.minAreaRect(selected_contour) # minAreaRect returns a Box2D structure. A Box2D structure is a tuple of ((x, y), (w, h), angle).
+    #         angle[index] = rect[2]
+
+
+    #     # for i in range (len(block_indices)):
+    #     #     print(f'x: {u_c[i]}, y: {v_c[i]}, angle: {angle[i]}')
+
+    #     # Draw the center of the selected contour
+    #     center_img = flatImg.copy()
+    #     for i in range(len(u_c)):    
+    #         cv2.circle(center_img, (int(u_c[i]), int(v_c[i])), 5, (255, 255, 0), -1)
+
+    #     # plt.imshow(cv2.cvtColor(center_img, cv2.COLOR_BGR2RGB))
+    #     # plt.title(f'Center of the selected contour for label {block_cluster_label}')
+    #     # plt.gca().invert_yaxis()
+    #     # plt.show()
+
+    #     aruco_origin_x = ImageCapture.aruco_corners[0][0][0]
+    #     aruco_origin_y = ImageCapture.aruco_corners[0][0][1]
+    #     u_c_m = u_c / ppi_2 * (25.4 / 1000)
+    #     v_c_m = v_c / ppi_2 * (25.4 / 1000)
+
+    #     for i in range (len(block_indices)):
+    #         print(f'x: {u_c_m[i]}, y: {v_c_m[i]}, angle: {angle[i]}')
+
+    #     # HERE - if the tags are angled, this needs to be modified
+    #     work_x = aruco_origin_x - v_c_m
+    #     work_y = aruco_origin_y + u_c_m
+    #     # angle = angle - 90
+
+    #     # print(work_x)
+    #     # print(work_y)
+    #     # print(angle)
+
+    #     return work_x, work_y, angle
 
 class EGMClient(Node):
     def __init__(self):
@@ -581,7 +774,21 @@ class EGMClient(Node):
             return False
 
         goal = ExecuteTrajectory.Goal()
-        goal.trajectory = traj.joint_trajectory
+        # goal.trajectory = traj.joint_trajectory
+
+        ############################################# HERE: faster test modification, comment above goal.trajectory
+
+        temp_joint_traj = JointTrajectory()
+        temp_joint_traj.header = traj.joint_trajectory.header
+        temp_joint_traj.joint_names = list(traj.joint_trajectory.joint_names)
+        temp_joint_traj.points = traj.joint_trajectory.points[::2]
+        if temp_joint_traj.points[-1] is not traj.joint_trajectory.points[-1]:
+            temp_joint_traj.points.append(traj.joint_trajectory.points[-1])
+
+        goal.trajectory = temp_joint_traj
+
+        #############################################
+        
         goal.stop_active_motion = True
 
         send_future = self.execute_traj_ac.send_goal_async(goal)
@@ -1313,16 +1520,11 @@ def main():
         num_blocks_arr[out_block_index] += 1
 
 
-    #Get coordinates of the available blocks, loop back if still in radius of tower
-    #HERE can maybe do later
 
-
-    
     #Grab starting from closest blocks
     #Move to tower
     #Move with gripper always above height of tower by a bit
     #Repeat until tower is built
-
 
     #HERE can do more stuff with order of placement within a layer
     tower_block_num = 0

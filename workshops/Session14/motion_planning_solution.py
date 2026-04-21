@@ -2,7 +2,7 @@ from typing import Optional
 
 import rclpy
 
-from generate_tower_plan import generate_tower_plan
+from scripts.generate_tower_plan import generate_tower_plan
 
 from rclpy.node import Node
 from rclpy.action import ActionClient

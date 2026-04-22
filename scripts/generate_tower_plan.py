@@ -5,6 +5,8 @@ from typing import Any, Dict
 
 from openai import OpenAI
 
+import numpy as np
+
 # -------- Paths --------
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -18,6 +20,33 @@ def load_text(path: Path) -> str:
 def load_json(path: Path) -> Dict[str, Any]:
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
+    
+
+def yaw_to_topdown_quat(theta_deg):
+    theta = np.deg2rad(theta_deg)
+
+    # yaw rotation quaternion (around Z)
+    w = np.cos(theta / 2)
+    z = np.sin(theta / 2)
+
+    yaw_quat = np.array([w, 0.0, 0.0, z])
+
+    # base top-down quaternion
+    base = np.array([0.0, 0.0, 1.0, 0.0])
+
+    # quaternion multiply: yaw * base
+    w1, x1, y1, z1 = yaw_quat
+    w2, x2, y2, z2 = base
+
+    result = np.array([
+        w1*w2 - x1*x2 - y1*y2 - z1*z2,
+        w1*x2 + x1*w2 + y1*z2 - z1*y2,
+        w1*y2 - x1*z2 + y1*w2 + z1*x2,
+        w1*z2 + x1*y2 - y1*x2 + z1*w2
+    ])
+
+    return [0.0, 1.0, 0.0, 0.0]
+
 
 
 # -------- Core Function --------
@@ -73,14 +102,19 @@ def generate_tower_plan(
     # Parse JSON output
     try:
         result = json.loads(response.output_text)
+
+        # Compute robot-safe quaternions from yaw
+        for block in result.get("blocks", []):
+            theta = block.get("yaw_degrees", 0)
+            block["goal_quaternion_wxyz"] = yaw_to_topdown_quat(theta)
+
         print("\n===== Generated Tower Coordinates =====")
         for i, block in enumerate(result.get("blocks", [])):
-            pos = block["goal_position"]
-            quat = block["goal_quaternion_wxyz"]
-
             print(f"[{i}]")
-            print(f"  Position: {pos}")
-            print(f"  Quaternion: {quat}")
+            print(f"  Position: {block['goal_position']}")
+            print(f"  Yaw: {block['yaw_degrees']}")
+            print(f"  Quaternion: {block['goal_quaternion_wxyz']}")
+
     except Exception as e:
         raise RuntimeError(f"Failed to parse model output: {e}\n{response.output_text}")
 
@@ -102,14 +136,7 @@ def validate_plan(plan: Dict[str, Any]) -> None:
 
 # -------- Example Run --------
 if __name__ == "__main__":
-    workspace = {
-        "x_min": 0.20,
-        "x_max": 0.55,
-        "y_min": 0.10,
-        "y_max": 0.35,
-        "z_min": 0.02,
-        "z_max": 0.15,
-    }
+    workspace = None
 
     plan = generate_tower_plan(
         tower_description=(
@@ -117,7 +144,7 @@ if __name__ == "__main__":
             "Alternate each level's rotation such that it creates a triangle"
         ),
         available_blocks=12,
-        tower_center=[0.419, 0.221, 0.021],
+        tower_center=[0.2, 0.2, 0.021],
         workspace=workspace,
     )
 

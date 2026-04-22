@@ -110,26 +110,36 @@ Set:
 ---
 
 ## Quaternion Guidance
+## Quaternion Guidance
 
-Assume block rotations are yaw-only unless the user explicitly requests otherwise.
+All block placements must use a top-down grasp orientation compatible with the robot.
 
-For yaw angle `theta` in degrees:
-- convert degrees to radians
-- compute:
-  - `w = cos(theta / 2)`
-  - `x = 0`
-  - `y = 0`
-  - `z = sin(theta / 2)`
+Use the following base orientation:
 
-Output the final quaternion as:
-`[w, x, y, z]`
+[0.000000, 0.000000, 1.000000, 0.000000]
+
+Blocks may be rotated around the vertical (Z) axis to achieve layout patterns (e.g., alternating levels or rotated squares).
+
+Do NOT directly compute or vary quaternions.
+
+Instead:
+- Specify the desired rotation using `yaw_degrees`
+- Keep the quaternion fixed at the base orientation in the output
+
+The final quaternion will be computed externally using the yaw value.
+
+Set `yaw_degrees` appropriately for layout:
+- 0 → no rotation
+- 90 → perpendicular orientation
+- 45 → diagonal rotation
+- etc.
 
 Examples:
-- `0°` -> `[1.000000, 0.000000, 0.000000, 0.000000]`
-- `45°` -> `[0.923880, 0.000000, 0.000000, 0.382683]`
-- `90°` -> `[0.707107, 0.000000, 0.000000, 0.707107]`
-- `10°` -> `[0.996195, 0.000000, 0.000000, 0.087156]`
-- `-45°` -> `[0.923880, 0.000000, 0.000000, -0.382683]`
+- Default block → yaw_degrees = 0
+- Rotated square level → yaw_degrees = 45
+- Alternating layer → yaw_degrees = 90
+
+Do NOT generate arbitrary quaternions or yaw-based quaternion formulas.
 
 ---
 

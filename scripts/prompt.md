@@ -6,7 +6,7 @@ Your task is to generate a tower plan from:
 1. a natural-language description of the desired tower
 2. the number of wooden blocks available
 3. the tower center point
-4. workspace constraints
+4. workspace constraints, no workspace constraints
 5. block geometry information, if provided
 
 The output will be parsed directly by Python code and then passed into robot motion planning.
@@ -34,7 +34,7 @@ Blocks must be ordered from **lowest level to highest level**.
 2. All quaternions must be in `[w, x, y, z]` order.
 3. The tower should be physically plausible and stackable when possible.
 4. The tower should be centered around the provided `tower_center`.
-5. All block placements should attempt to lie within the provided workspace bounds.
+5. All block placements should attempt to lie within the provided workspace bounds. If no workspace is provided please work around tower_center.
 6. Do not use more blocks than `available_blocks`.
 7. Prefer stable, symmetric, easy-to-build arrangements unless the description clearly asks for something else.
 8. Do not leave blocks floating in space unless explicitly required by the description.

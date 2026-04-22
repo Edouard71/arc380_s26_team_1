@@ -20,34 +20,34 @@ def load_text(path: Path) -> str:
 def load_json(path: Path) -> Dict[str, Any]:
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
-    
 
-def yaw_to_topdown_quat(theta_deg):
-    theta = np.deg2rad(theta_deg)
 
-    # yaw rotation quaternion (around Z)
-    w = np.cos(theta / 2)
-    z = np.sin(theta / 2)
-
-    yaw_quat = np.array([w, 0.0, 0.0, z])
-
-    # base top-down quaternion
-    base = np.array([0.0, 0.0, 1.0, 0.0])
-
-    # quaternion multiply: yaw * base
-    w1, x1, y1, z1 = yaw_quat
-    w2, x2, y2, z2 = base
-
-    result = np.array([
+def quat_multiply(q1, q2):
+    w1, x1, y1, z1 = q1
+    w2, x2, y2, z2 = q2
+    return [
         w1*w2 - x1*x2 - y1*y2 - z1*z2,
         w1*x2 + x1*w2 + y1*z2 - z1*y2,
         w1*y2 - x1*z2 + y1*w2 + z1*x2,
-        w1*z2 + x1*y2 - y1*x2 + z1*w2
-    ])
+        w1*z2 + x1*y2 - y1*x2 + z1*w2,
+    ]
 
-    return [0.0, 1.0, 0.0, 0.0]
+def yaw_to_robot_quat(theta_deg):
+    theta = np.deg2rad(theta_deg)
 
+    # yaw rotation about Z
+    yaw_quat = [
+        float(np.cos(theta / 2.0)),
+        0.0,
+        0.0,
+        float(np.sin(theta / 2.0)),
+    ]
 
+    # your robot-safe top-down base orientation
+    base_quat = [0.0, 1.0, 0.0, 0.0]
+
+    # apply yaw relative to base
+    return quat_multiply(yaw_quat, base_quat)
 
 # -------- Core Function --------
 def generate_tower_plan(
@@ -103,10 +103,10 @@ def generate_tower_plan(
     try:
         result = json.loads(response.output_text)
 
-        # Compute robot-safe quaternions from yaw
+        # Compute quaternions from yaw
         for block in result.get("blocks", []):
             theta = block.get("yaw_degrees", 0)
-            block["goal_quaternion_wxyz"] = yaw_to_topdown_quat(theta)
+            block["goal_quaternion_wxyz"] = yaw_to_robot_quat(theta)
 
         print("\n===== Generated Tower Coordinates =====")
         for i, block in enumerate(result.get("blocks", [])):
@@ -117,7 +117,7 @@ def generate_tower_plan(
 
     except Exception as e:
         raise RuntimeError(f"Failed to parse model output: {e}\n{response.output_text}")
-
+    
     return result
 
 

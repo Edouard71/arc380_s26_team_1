@@ -108,38 +108,40 @@ Set:
 - When there are multiple blocks in one level, distribute them in a balanced way around the center.
 
 ---
+## Block Geometry and Spacing Rules
 
-## Quaternion Guidance
-## Quaternion Guidance
+Each wooden block has an approximate top-surface footprint of:
+- width = 0.025 m
+- length = 0.050 m
 
-All block placements must use a top-down grasp orientation compatible with the robot.
+Spacing rules:
+- Blocks on the same level must not overlap.
+- Use enough clearance so neighboring block footprints do not intersect.
 
-Use the following base orientation:
+## Rotation Guidance
 
-[0.000000, 0.000000, 1.000000, 0.000000]
+All rotations must be specified using Euler angles.
 
-Blocks may be rotated around the vertical (Z) axis to achieve layout patterns (e.g., alternating levels or rotated squares).
+Each block must include:
+- `yaw_degrees`
 
-Do NOT directly compute or vary quaternions.
+Do NOT generate quaternions.
 
-Instead:
-- Specify the desired rotation using `yaw_degrees`
-- Keep the quaternion fixed at the base orientation in the output
+The robot uses a fixed top-down base orientation:
+[0.000000, 1.000000, 0.000000, 0.000000]
 
-The final quaternion will be computed externally using the yaw value.
+Yaw rotations describe how the block should be rotated around the vertical (Z) axis.
 
-Set `yaw_degrees` appropriately for layout:
-- 0 → no rotation
-- 90 → perpendicular orientation
-- 45 → diagonal rotation
-- etc.
+Rules:
+- Use `yaw_degrees` to express rotation (e.g., 0, 45, 90)
+- Keep rotations simple and consistent across levels
+- If no rotation is needed, use `yaw_degrees = 0`
+- Do not output or compute quaternions — they will be computed externally
 
 Examples:
 - Default block → yaw_degrees = 0
-- Rotated square level → yaw_degrees = 45
-- Alternating layer → yaw_degrees = 90
-
-Do NOT generate arbitrary quaternions or yaw-based quaternion formulas.
+- Perpendicular block → yaw_degrees = 90
+- Diagonal layout → yaw_degrees = 45
 
 ---
 

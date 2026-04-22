@@ -1493,9 +1493,15 @@ def main():
     ##########################################################################################################################################
 
     description_prompt = '''
-    Build a 1-level square tower with 3 blocks per level.         
-    Alternate each level's rotation such that it creates a triangle'''
-    
+    Build a 2-level triangular tower using 3 blocks per level (6 blocks total).
+
+    Tower requirements:
+    - Each level forms an equilateral triangle (3 blocks evenly spaced around the center).
+    - Every subsequent simply takes the triangle from the layer before and rotates 45 degrees.
+    - This new subsequent layer should be layered directly on top of the previous layer.
+
+    '''
+
     plan = generate_tower_plan(
         tower_description=description_prompt,
         available_blocks=quantity_blocks_available,

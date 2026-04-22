@@ -17,8 +17,8 @@ x-ros2-common: &ros2-common
     - LIBGL_ALWAYS_SOFTWARE=1
     - GALLIUM_DRIVER=llvmpipe
     - QT_X11_NO_MITSHM=1
-    - OPENAI_API_KEY=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
-
+    - OPENAI_API_KEY=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
+     
   ipc: host
   stdin_open: true
   tty: true

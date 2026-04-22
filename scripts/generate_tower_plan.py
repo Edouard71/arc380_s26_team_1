@@ -70,6 +70,8 @@ def generate_tower_plan(
         }
     )
 
+    print("GPT-5.4 Response", response)
+
     # Parse JSON output
     try:
         result = json.loads(response.output_text)

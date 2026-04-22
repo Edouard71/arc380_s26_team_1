@@ -1492,22 +1492,16 @@ def main():
 
     ##########################################################################################################################################
 
-    # description_prompt = '''Build a 2-level square tower with 4 blocks per level. 
-    #             Alternate the orientation of the second level.'''
-
-    # plan = generate_tower_plan(
-    #     tower_description=description_prompt,
-    #     available_blocks=quantity_blocks_available,
-    #     tower_center=[tower_x, tower_y, base_z],
-    #     workspace={
-    #         "x_min": 0.20,
-    #         "x_max": 0.55,
-    #         "y_min": 0.10,
-    #         "y_max": 0.50,
-    #         "z_min": 0.00,
-    #         "z_max": 0.20,
-    #     },
-    # )
+    description_prompt = '''
+    Build a 1-level square tower with 3 blocks per level.         
+    Alternate each level's rotation such that it creates a triangle'''
+    
+    plan = generate_tower_plan(
+        tower_description=description_prompt,
+        available_blocks=quantity_blocks_available,
+        tower_center=[tower_x, tower_y, base_z],
+        workspace=None,
+    )
 
     # tower_block_points = plan_to_tower_block_points(plan)
     
@@ -1570,22 +1564,14 @@ def main():
 
         num_blocks_arr[out_block_index] += 1
 
-    ##########################################################################################################################################
-    # available_blocks_after_clearing = int(np.sum(num_blocks_arr[:len(out_blocks)]))
-    #
-    # final_plan = generate_tower_plan(
-    #                 tower_description=description_prompt,
-    #                 available_blocks=available_blocks_after_clearing,
-    #                 tower_center=[tower_x, tower_y, base_z],
-    #                 workspace={
-    #                     "x_min": 0.20,
-    #                     "x_max": 0.55,
-    #                     "y_min": 0.10,
-    #                     "y_max": 0.50,
-    #                     "z_min": 0.00,
-    #                     "z_max": 0.20,
-    #                 },
-    #             )
+    available_blocks_after_clearing = int(np.sum(num_blocks_arr[:len(out_blocks)]))
+
+    final_plan = generate_tower_plan(
+                    tower_description=description_prompt,
+                    available_blocks=available_blocks_after_clearing,
+                    tower_center=[tower_x, tower_y, base_z],
+                    workspace=None,
+                )
 
     # tower_block_points = plan_to_tower_block_points(final_plan)
     ##########################################################################################################################################

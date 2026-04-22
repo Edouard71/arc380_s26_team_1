@@ -1492,36 +1492,37 @@ def main():
 
     ##########################################################################################################################################
 
-    description_prompt = '''Build a 2-level square tower with 4 blocks per level. 
-                Alternate the orientation of the second level.'''
+    # description_prompt = '''Build a 2-level square tower with 4 blocks per level. 
+    #             Alternate the orientation of the second level.'''
 
-    plan = generate_tower_plan(
-        tower_description=description_prompt,
-        available_blocks=quantity_blocks_available,
-        tower_center=[tower_x, tower_y, base_z],
-        workspace={
-            "x_min": 0.20,
-            "x_max": 0.55,
-            "y_min": 0.10,
-            "y_max": 0.50,
-            "z_min": 0.00,
-            "z_max": 0.20,
-        },
-    )
+    # plan = generate_tower_plan(
+    #     tower_description=description_prompt,
+    #     available_blocks=quantity_blocks_available,
+    #     tower_center=[tower_x, tower_y, base_z],
+    #     workspace={
+    #         "x_min": 0.20,
+    #         "x_max": 0.55,
+    #         "y_min": 0.10,
+    #         "y_max": 0.50,
+    #         "z_min": 0.00,
+    #         "z_max": 0.20,
+    #     },
+    # )
 
-    tower_block_points = plan_to_tower_block_points(plan)
+    # tower_block_points = plan_to_tower_block_points(plan)
     
     #####################################################################################################################
-    # tower_block_points = [
-    #     [[tower_x+parallel_dx, tower_y, base_z], [0.0, a, a, 0.0]],
-    #     [[tower_x, tower_y+parallel_dy, base_z], [0.0, 1.0, 0.0, 0.0]],
-    #     [[tower_x-parallel_dx, tower_y, base_z], [0.0, a, a, 0.0]],
-    #     [[tower_x, tower_y-parallel_dy, base_z], [0.0, 1.0, 0.0, 0.0]],
-    #     [[tower_x+diagonal_dx, tower_y+diagonal_dy, base_z+dz], [0.0, b, -c, 0.0]],
-    #     [[tower_x-diagonal_dx, tower_y+diagonal_dy, base_z+dz], [0.0, b, c, 0.0]],
-    #     [[tower_x-diagonal_dx, tower_y-diagonal_dy, base_z+dz], [0.0, b, -c, 0.0]],
-    #     [[tower_x+diagonal_dx, tower_y-diagonal_dy, base_z+dz], [0.0, b, c, 0.0]],
-    # ]
+    tower_block_points = [
+        [[tower_x+parallel_dx, tower_y, base_z], [0.0, a, a, 0.0]],
+        [[tower_x, tower_y+parallel_dy, base_z], [0.0, 1.0, 0.0, 0.0]],
+        [[tower_x-parallel_dx, tower_y, base_z], [0.0, a, a, 0.0]],
+        [[tower_x, tower_y-parallel_dy, base_z], [0.0, 1.0, 0.0, 0.0]],
+        [[tower_x+diagonal_dx, tower_y+diagonal_dy, base_z+dz], [0.0, b, -c, 0.0]],
+        [[tower_x-diagonal_dx, tower_y+diagonal_dy, base_z+dz], [0.0, b, c, 0.0]],
+        [[tower_x-diagonal_dx, tower_y-diagonal_dy, base_z+dz], [0.0, b, -c, 0.0]],
+        [[tower_x+diagonal_dx, tower_y-diagonal_dy, base_z+dz], [0.0, b, c, 0.0]],
+    ]
+    ##########################################################################################################################################
 
 
     #Get radius of tower, indicies of blocks that are in the tower area
@@ -1569,23 +1570,25 @@ def main():
 
         num_blocks_arr[out_block_index] += 1
 
-    available_blocks_after_clearing = int(np.sum(num_blocks_arr[:len(out_blocks)]))
+    ##########################################################################################################################################
+    # available_blocks_after_clearing = int(np.sum(num_blocks_arr[:len(out_blocks)]))
+    #
+    # final_plan = generate_tower_plan(
+    #                 tower_description=description_prompt,
+    #                 available_blocks=available_blocks_after_clearing,
+    #                 tower_center=[tower_x, tower_y, base_z],
+    #                 workspace={
+    #                     "x_min": 0.20,
+    #                     "x_max": 0.55,
+    #                     "y_min": 0.10,
+    #                     "y_max": 0.50,
+    #                     "z_min": 0.00,
+    #                     "z_max": 0.20,
+    #                 },
+    #             )
 
-    final_plan = generate_tower_plan(
-                    tower_description=description_prompt,
-                    available_blocks=available_blocks_after_clearing,
-                    tower_center=[tower_x, tower_y, base_z],
-                    workspace={
-                        "x_min": 0.20,
-                        "x_max": 0.55,
-                        "y_min": 0.10,
-                        "y_max": 0.50,
-                        "z_min": 0.00,
-                        "z_max": 0.20,
-                    },
-                )
-
-    tower_block_points = plan_to_tower_block_points(final_plan)
+    # tower_block_points = plan_to_tower_block_points(final_plan)
+    ##########################################################################################################################################
 
     #HERE can do more stuff with order of placement within a layer
     tower_block_num = 0

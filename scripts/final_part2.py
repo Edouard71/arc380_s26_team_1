@@ -314,8 +314,8 @@ class ImageCapture:
             # print(f'x,y: {rect[0]}, w,h: {rect[1]}')
 
 
-        for i in range (len(block_indices)):
-            print(f'x: {u_c[i]}, y: {v_c[i]}, angle: {angle[i]}')
+        # for i in range (len(block_indices)):
+        #     print(f'x: {u_c[i]}, y: {v_c[i]}, angle: {angle[i]}')
 
         # Draw the center of the selected contour
         center_img = flatImg.copy()
@@ -325,21 +325,21 @@ class ImageCapture:
         
         u_c_m = u_c / ppi_2 * (25.4 / 1000)
         v_c_m = v_c / ppi_2 * (25.4 / 1000)
-        print(f'u_c_m: {u_c_m}')
-        print(f'v_c_m: {v_c_m}')
+        # print(f'u_c_m: {u_c_m}')
+        # print(f'v_c_m: {v_c_m}')
 
-        # HERE - if the tags are angled, this needs to be modified
-        # aruco_origin_x = ImageCapture.aruco_corners[3][0][0]
-        # aruco_origin_y = ImageCapture.aruco_corners[3][0][1]
-        aruco_origin_x = 0 # GET MEASUREMENTS FOR THESE
-        aruco_origin_y = 0 # GET MEASUREMENTS FOR THESE
-        aruco_opp_x = height * (25.4 / 1000) # GET MEASUREMENTS FOR THESE
-        aruco_opp_y = width * (25.4 / 1000) # GET MEASUREMENTS FOR THESE
+        aruco_origin_x = -0.26382 # GET MEASUREMENTS FOR THESE
+        aruco_origin_y = 0.10624 # GET MEASUREMENTS FOR THESE
+        # aruco_opp_x = height * (25.4 / 1000)
+        # aruco_opp_y = width * (25.4 / 1000)
+        aruco_opp_x = 0.54655 + 0.00448 #74.65 --> 79.13
+        aruco_opp_y = 0.15852 - 0.02857 #369.02 --> 340.45
         real_corner_angle = np.arctan2(aruco_opp_y - aruco_origin_y, aruco_opp_x - aruco_origin_x)
-        ideal_corner_angle = np.arctan2(width, height)
+        ideal_corner_angle = np.arctan2(0.05, height * (25.4 / 1000))
 
         corner_angle_diff = real_corner_angle - ideal_corner_angle
         print(corner_angle_diff)
+        print('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')
 
         work_x = aruco_origin_x + (u_c_m * np.cos(corner_angle_diff)) - (v_c_m * np.sin(corner_angle_diff))
         work_y = aruco_origin_y + (v_c_m * np.cos(corner_angle_diff)) + (u_c_m * np.sin(corner_angle_diff))
@@ -754,10 +754,10 @@ def main():
     # )
 
 
-    # color, depth, meta = ImageCapture.request_capture()
+    color, depth, meta = ImageCapture.request_capture()
 
-    img_path = Path(r"C:\Users\alexl\Documents\Python_Scripts\ARC380\ARC380_Team_1\arc380_s26_team_1\realsense_shared\color.png")
-    color = cv2.imread(str(img_path), cv2.IMREAD_COLOR)
+    # img_path = Path(r"C:\Users\alexl\Documents\Python_Scripts\ARC380\ARC380_Team_1\arc380_s26_team_1\realsense_shared\color.png")
+    # color = cv2.imread(str(img_path), cv2.IMREAD_COLOR)
     
 
     flatImg = ImageCapture.removePerspective(color)

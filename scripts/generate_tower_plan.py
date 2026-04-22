@@ -31,6 +31,9 @@ def generate_tower_plan(
     Calls GPT-5.4 to generate a tower plan JSON.
     """
 
+    print("Accessing Gpt-5.4 Model\n")
+    print(f"Tower Description: {tower_description}\n")
+    print(f"Available Blocks: {available_blocks}\n")
     client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
     # Load files
@@ -51,6 +54,7 @@ def generate_tower_plan(
     input_str = json.dumps(runtime_input, indent=2)
 
     # Call model
+    print("Calling Gpt-5.4 Model For Tower Construction Plan")
     response = client.responses.create(
         model="gpt-5.4",
         reasoning={"effort": "high"},

@@ -70,11 +70,17 @@ def generate_tower_plan(
         }
     )
 
-    print("GPT-5.4 Response", response)
-
     # Parse JSON output
     try:
         result = json.loads(response.output_text)
+        print("\n===== Generated Tower Coordinates =====")
+        for i, block in enumerate(result.get("blocks", [])):
+            pos = block["goal_position"]
+            quat = block["goal_quaternion_wxyz"]
+
+            print(f"[{i}]")
+            print(f"  Position: {pos}")
+            print(f"  Quaternion: {quat}")
     except Exception as e:
         raise RuntimeError(f"Failed to parse model output: {e}\n{response.output_text}")
 

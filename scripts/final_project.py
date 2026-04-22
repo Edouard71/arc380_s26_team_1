@@ -1550,6 +1550,7 @@ def main():
 
     in_blocks = [sorted_scattered_block_array[i] for i in indices_within_radius]
     out_blocks = [sorted_scattered_block_array[i] for i in indices_outside_radius]
+    num_blocks_arr = np.ones(len(out_blocks))
 
     #Clear blocks out of the radius of the tower onto other blocks
     #HERE if no blocks outside radius it dies

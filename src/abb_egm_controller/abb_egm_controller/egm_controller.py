@@ -35,26 +35,29 @@ from abb_egm_controller.msg_conversion import egm_robot_to_ros, ros_sensor_to_eg
 class TrajExecutionState:
     points: list[JointTrajectoryPoint] = field(default_factory=list)
     joint_indices: list[int] = field(default_factory=list)  # trajectory joint order -> robot joint index
-    segment: int = 0  # index of the waypoint currently being targeted (0 = points[0])
+    start_time: float = 0.0
+    current_idx: int = 0
+    segment_idx: int = 0
     last_setpoint: list[float] = field(default_factory=list)
+    start_positions: list[float] = field(default_factory=list)
     done_event: Event = field(default_factory=Event)
     cancelled: bool = False
-    traj_elapsed: float = 0.0   # seconds of active (un-paused) trajectory time accumulated
-    last_tick: float = 0.0      # monotonic time of the last EGM packet, used to compute dt
+    egm_disconnect_abort: bool = False
 
     def reset(self):
         self.points.clear()
         self.joint_indices.clear()
-        self.segment = 0
+        self.start_time = 0.0
+        self.current_idx = 0
+        self.segment_idx = 0
         self.last_setpoint.clear()
+        self.start_positions.clear()
         self.done_event.clear()
         self.cancelled = False
-        self.traj_elapsed = 0.0
-        self.last_tick = 0.0
+        self.egm_disconnect_abort = False
 
 
 class EGMController(Node):
-
     # region Initialization
 
     def __init__(self, node_name: str = "egm_controller"):
@@ -72,6 +75,7 @@ class EGMController(Node):
         # Trajectory execution state (shared between EGM loop and action execute callback)
         self._traj_lock = Lock()
         self._traj_state = TrajExecutionState()
+        self._traj_final_goal_tolerance: float = 0.001  # radians
 
         self._gripper_lock = Lock()
         self._gripper_cmd = False
@@ -184,15 +188,16 @@ class EGMController(Node):
                 if self.egm_connected:
                     self.egm_connected = False
                     self.get_logger().warning("EGM connection lost, no data received")
+                    if self.state == ControllerState.TRAJECTORY:
+                        self.get_logger().error("EGM disconnected during trajectory execution — aborting trajectory")
+                        with self._traj_lock:
+                            self._traj_state.egm_disconnect_abort = True
+                        self._cancel_trajectory_motion()
                 continue
 
             if not self.egm_connected:
                 self.egm_connected = True
                 self.get_logger().info(f"EGM connection established with {addr}")
-                # Reset the trajectory tick so the gap while disconnected is not
-                # counted as active trajectory time (avoids skipping waypoints on resume).
-                with self._traj_lock:
-                    self._traj_state.last_tick = 0.0
 
             egm_robot_msg = egm.EgmRobot()
             egm_robot_msg.ParseFromString(data)
@@ -286,36 +291,75 @@ class EGMController(Node):
                 ros_sensor_msg.planned_ext_joints = ros_robot_msg.feedback_ext_joints
                 return ros_sensor_msg
 
-            actual = list(ros_robot_msg.feedback_joints.position)
+            actual = ros_robot_msg.feedback_joints.position
             setpoint = list(actual)
 
-            seg = self._traj_state.segment
-            target = self._traj_state.points[seg].positions
+            elapsed = time.monotonic() - self._traj_state.start_time
+            final_time = (
+                self._traj_state.points[-1].time_from_start.sec
+                + 1e-9 * self._traj_state.points[-1].time_from_start.nanosec
+            )
 
-            # Send the target waypoint directly as the setpoint (no interpolation).
+            # Advance cached segment index only forward
+            last_seg = len(self._traj_state.points) - 1
+            while (
+                self._traj_state.segment_idx < last_seg
+                and (
+                    self._traj_state.points[self._traj_state.segment_idx].time_from_start.sec
+                    + 1e-9 * self._traj_state.points[self._traj_state.segment_idx].time_from_start.nanosec
+                )
+                < elapsed
+            ):
+                self._traj_state.segment_idx += 1
+
+            # Determine interpolation endpoints
+            if self._traj_state.segment_idx == 0:
+                t0 = 0.0
+                p0 = self._traj_state.start_positions
+                p1 = self._traj_state.points[0].positions
+                t1 = (
+                    self._traj_state.points[0].time_from_start.sec
+                    + 1e-9 * self._traj_state.points[0].time_from_start.nanosec
+                )
+                current_idx = 0
+            else:
+                prev_pt = self._traj_state.points[self._traj_state.segment_idx - 1]
+                next_pt = self._traj_state.points[self._traj_state.segment_idx]
+                t0 = prev_pt.time_from_start.sec + 1e-9 * prev_pt.time_from_start.nanosec
+                t1 = next_pt.time_from_start.sec + 1e-9 * next_pt.time_from_start.nanosec
+                p0 = prev_pt.positions
+                p1 = next_pt.positions
+                current_idx = self._traj_state.segment_idx
+
+            # Interpolate according to elapsed time
+            if elapsed >= final_time:
+                alpha = 1.0
+            elif t1 <= t0:
+                alpha = 1.0
+            else:
+                alpha = (elapsed - t0) / (t1 - t0)
+                alpha = max(0.0, min(1.0, alpha))
+
+            sq_final_err = 0.0
+            final_positions = self._traj_state.points[-1].positions
+
             for i, traj_i in enumerate(self._traj_state.joint_indices):
-                setpoint[traj_i] = target[i]
+                q0 = p0[traj_i] if self._traj_state.segment_idx == 0 else p0[i]
+                q1 = p1[i]
+                desired_i = q0 + alpha * (q1 - q0)
+                setpoint[traj_i] = desired_i
 
-            # Advance the trajectory clock only while EGM packets are arriving.
-            # This means pauses (teach pendant enable released, EGM disconnect) freeze
-            # the clock so the robot resumes from the correct waypoint rather than
-            # jumping ahead to wherever wall-clock time would have placed it.
-            now = time.monotonic()
-            if self._traj_state.last_tick > 0.0:
-                self._traj_state.traj_elapsed += now - self._traj_state.last_tick
-            self._traj_state.last_tick = now
+                final_err = final_positions[i] - actual[traj_i]
+                sq_final_err += final_err * final_err
 
-            point = self._traj_state.points[seg]
-            scheduled_time = point.time_from_start.sec + point.time_from_start.nanosec * 1e-9
-            due = self._traj_state.traj_elapsed >= scheduled_time
+            final_err_norm = math.sqrt(sq_final_err)
 
             with self._traj_lock:
+                self._traj_state.segment_idx = self._traj_state.segment_idx
+                self._traj_state.current_idx = current_idx
                 self._traj_state.last_setpoint = setpoint
-                if due:
-                    if seg < len(self._traj_state.points) - 1:
-                        self._traj_state.segment += 1
-                    else:
-                        self._traj_state.done_event.set()
+                if elapsed >= final_time and final_err_norm <= self._traj_final_goal_tolerance:
+                    self._traj_state.done_event.set()
 
             ros_sensor_msg.planned_joints.header = ros_robot_msg.feedback_joints.header
             ros_sensor_msg.planned_joints.position = setpoint
@@ -385,13 +429,24 @@ class EGMController(Node):
         robot_joint_names = self.config.robot_joint_names
         joint_indices = [robot_joint_names.index(name) for name in trajectory.joint_names]
 
+        initial_feedback = self._latest_feedback_joints.copy()
+        if not initial_feedback:
+            initial_feedback = [0.0] * len(robot_joint_names)
+
         with self._traj_lock:
             self._traj_state.reset()  # TODO: instead of making this a state tracker, refactor into a trajectory executable, and each call instantiates a new instance
             self._traj_state.points = list(trajectory.points)
             self._traj_state.joint_indices = joint_indices
+            self._traj_state.start_positions = list(initial_feedback)
+
+        # Capture start_time as late as possible, immediately before starting execution,
+        # so that elapsed time in the EGM loop reflects actual robot motion time.
+        start_time = time.monotonic()
+        with self._traj_lock:
+            self._traj_state.start_time = start_time
 
         self.state = ControllerState.TRAJECTORY
-        self.get_logger().info(f"Executing trajectory: {len(trajectory.points)} waypoints")
+        self.get_logger().info(f"Executing time-parameterized trajectory with {len(trajectory.points)} points")
 
         feedback = ExecuteTrajectory.Feedback()
 
@@ -406,6 +461,14 @@ class EGMController(Node):
                 return result
 
             if self._traj_state.done_event.is_set():
+                if self._traj_state.egm_disconnect_abort:
+                    self.get_logger().error("Trajectory aborted due to EGM connection loss")
+                    self.state = ControllerState.IDLE
+                    goal_handle.abort()
+                    result.success = False
+                    result.message = "Trajectory aborted: EGM connection lost"
+                    result.error_code = 4
+                    return result
                 self.get_logger().info("Trajectory execution completed successfully")
                 self.state = ControllerState.IDLE
                 goal_handle.succeed()
@@ -414,15 +477,16 @@ class EGMController(Node):
                 result.error_code = 0
                 return result
 
+            elapsed = time.monotonic() - start_time
             with self._traj_lock:
-                seg = self._traj_state.segment
+                current_idx = self._traj_state.current_idx
                 desired_all = self._traj_state.last_setpoint
-                elapsed = self._traj_state.traj_elapsed
+
             feedback.elapsed_time = Duration(
                 sec=int(elapsed),
                 nanosec=int((elapsed - int(elapsed)) * 1e9),
             )
-            feedback.current_point_index = seg
+            feedback.current_point_index = current_idx
             feedback.desired_positions = [desired_all[j] for j in joint_indices] if desired_all else []
 
             actual_all = self._latest_feedback_joints

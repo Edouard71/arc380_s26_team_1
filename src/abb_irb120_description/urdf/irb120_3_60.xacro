@@ -11,4 +11,11 @@
     <child link="gripper_base"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
+
+  <link name="vacuum_tcp_calibrated"/>
+  <joint name="tool0-vacuum_tcp_calibrated" type="fixed">
+        <parent link="tool0"/>
+        <child link="vacuum_tcp_calibrated"/>
+        <origin xyz="0 0 0.184" rpy="0 0 ${radians(90)}"/>
+    </joint>
 </robot>

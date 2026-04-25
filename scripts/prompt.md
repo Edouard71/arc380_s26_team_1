@@ -108,17 +108,8 @@ Set:
 - When there are multiple blocks in one level, distribute them in a balanced way around the center.
 
 ---
-## Block Geometry and Spacing Rules
 
-Each wooden block has an approximate top-surface footprint of:
-- width = 0.025 m
-- length = 0.050 m
-
-Spacing rules:
-- Blocks on the same level must not overlap.
-- Use enough clearance so neighboring block footprints do not intersect.
-
-## Rotation Guidance
+# Rotation Guidance
 
 All rotations must be specified using Euler angles.
 

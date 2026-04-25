@@ -23,7 +23,7 @@ from shape_msgs.msg import SolidPrimitive
 
 from abb_egm_interfaces.action import ExecuteTrajectory
 from generate_tower_plan import generate_tower_plan
-
+from collision_check import validate_plan
 
 import json
 from pathlib import Path
@@ -333,7 +333,6 @@ class ImageCapture:
         center_img = flatImg.copy()
         for i in range(len(u_c)):    
             cv2.circle(center_img, (int(u_c[i]), int(v_c[i])), 5, (255, 255, 0), -1)
-
         
         u_c_m = u_c / ppi_2 * (25.4 / 1000)
         v_c_m = v_c / ppi_2 * (25.4 / 1000)
@@ -364,8 +363,19 @@ class ImageCapture:
         # plt.title(f'Center of the selected contour for label {block_cluster_label}')
         # plt.gca().invert_yaxis()
         # plt.show()
+        
+        # final calibration corrections based on testing
+        FINAL_X_BIAS = 0.005
+        FINAL_Y_BIAS = 0.005
 
-        return work_x, work_y, angle
+        # affine correction
+        dx = -0.0378 * work_x + 0.0224 * work_y - 0.0074
+        dy = -0.0242 * work_x - 0.0623 * work_y + 0.0153
+
+        dx += FINAL_X_BIAS
+        dy += FINAL_Y_BIAS
+                
+        return work_x + dx, work_y + dy, angle
 
 class EGMClient(Node):
     def __init__(self):
@@ -1176,7 +1186,7 @@ class Helpers:
     def moveArm(pos, quart, node):
         arm_traj = node.plan_arm_to_pose_constraints(
                 group_name="arm",
-                link_name="gripper_tcp_calibrated", 
+                link_name="vacuum_tcp_calibrated", 
                 # link_name="gripper_tcp", # sim to real (For all, comment out this sim to real line for real, comment above for sim)
                 frame_id="world",
                 goal_xyz=(pos[0], pos[1], pos[2]),
@@ -1255,6 +1265,7 @@ def assign_blocks_to_tower(scattered_block_array, tower_block_points):
 
     return assignments
 
+
 def main():
     rclpy.init()
     node = EGMClient()
@@ -1283,7 +1294,7 @@ def main():
     diagonal_dy = 0.043 * 0.707
     # base_z = 0.014 / 2
     base_z = 0
-    dz = 0.014
+    dz = 0.015
     large_clearance_z = 0.1
     drop_clearance_z = 0.001 #was 0.01 -> 0.004 -> 0.001
     # drop_clearance_z = 0.005 #sim to real
@@ -1291,7 +1302,8 @@ def main():
     first_block_x = 0.0
     first_block_y = 0.480
     above_block_z = 0.1
-    around_block_z = 0.025 #was 0.032 -> 0.025
+    # for vacuum gripper set to 0.030 || for regular gripper set to 0.025
+    around_block_z = 0.033 #was 0.032 -> 0.025
     # around_block_z = 0.032 # sim to real
     holder_dx = 0.06
     holder_dy = 0.06
@@ -1316,7 +1328,7 @@ def main():
     quarts = np.array([Helpers.euler_angles_to_quarternion([angle, 0, 180]) for angle in angle_blocks])
 
     scattered_block_array = [[[x, y, z], q] for x, y, z, q in zip(x_blocks, y_blocks, z_blocks, quarts)]
-
+        
     #Get coordinates of tower block
     # Perception Component Would Grab Quantity & Position Of Blocks 
     quantity_blocks_available = len(scattered_block_array)
@@ -1324,12 +1336,24 @@ def main():
     ##########################################################################################################################################
 
     description_prompt = '''
-    Build a 2-level triangular tower using 3 blocks per level (6 blocks total).
 
-    Tower requirements:
-    - Each level forms an equilateral triangle (3 blocks evenly spaced around the center).
-    - Every subsequent simply takes the triangle from the layer before and rotates 45 degrees.
-    - This new subsequent layer should be layered directly on top of the previous layer.
+    Construct a 2-level tower with a square base layer and a rotated square top layer.
+
+    TOWER STRUCTURE:
+
+    Base layer:
+- Use 4 blocks to form the perimeter of a square centered at tower_center.
+- Each block should be one side of the square.
+- Two opposite blocks are horizontal, forming the top and bottom sides.
+- Two opposite blocks are vertical, forming the left and right sides.
+- The blocks should nearly touch at the corners but must not overlap.
+- This should look like a hollow square frame from above, not a cross.
+
+Top layer:
+- Use 4 blocks to form another square frame directly on top of the base layer.
+- The top square should be centered at the same tower_center.
+- The top layer should be rotated 45 degrees relative to the bottom square.
+- The top layer z value should be exactly one block height above the base layer.
 
     '''
 
@@ -1340,19 +1364,30 @@ def main():
         workspace=None,
     )
 
-    # tower_block_points = plan_to_tower_block_points(plan)
+
+    check = validate_plan(plan)
+
+    if not check["valid"]:
+        print("INVALID PLAN: collisions found")
+        for c in check["collisions"]:
+            print(c["message"])
+            print(f"  block {c['block_a']} pos={c['pos_a']}")
+            print(f"  block {c['block_b']} pos={c['pos_b']}")
+        raise ValueError("LLM generated colliding block plan")
+
+    tower_block_points = plan_to_tower_block_points(plan)
     
     #####################################################################################################################
-    tower_block_points = [
-        [[tower_x+parallel_dx, tower_y, base_z], [0.0, a, a, 0.0]],
-        [[tower_x, tower_y+parallel_dy, base_z], [0.0, 1.0, 0.0, 0.0]],
-        [[tower_x-parallel_dx, tower_y, base_z], [0.0, a, a, 0.0]],
-        [[tower_x, tower_y-parallel_dy, base_z], [0.0, 1.0, 0.0, 0.0]],
-        [[tower_x+diagonal_dx, tower_y+diagonal_dy, base_z+dz], [0.0, b, -c, 0.0]],
-        [[tower_x-diagonal_dx, tower_y+diagonal_dy, base_z+dz], [0.0, b, c, 0.0]],
-        [[tower_x-diagonal_dx, tower_y-diagonal_dy, base_z+dz], [0.0, b, -c, 0.0]],
-        [[tower_x+diagonal_dx, tower_y-diagonal_dy, base_z+dz], [0.0, b, c, 0.0]],
-    ]
+    # tower_block_points = [
+    #     [[tower_x+parallel_dx, tower_y, base_z], [0.0, a, a, 0.0]],
+    #     [[tower_x, tower_y+parallel_dy, base_z], [0.0, 1.0, 0.0, 0.0]],
+    #     [[tower_x-parallel_dx, tower_y, base_z], [0.0, a, a, 0.0]],
+    #     [[tower_x, tower_y-parallel_dy, base_z], [0.0, 1.0, 0.0, 0.0]],
+    #     [[tower_x+diagonal_dx, tower_y+diagonal_dy, base_z+dz], [0.0, b, -c, 0.0]],
+    #     [[tower_x-diagonal_dx, tower_y+diagonal_dy, base_z+dz], [0.0, b, c, 0.0]],
+    #     [[tower_x-diagonal_dx, tower_y-diagonal_dy, base_z+dz], [0.0, b, -c, 0.0]],
+    #     [[tower_x+diagonal_dx, tower_y-diagonal_dy, base_z+dz], [0.0, b, c, 0.0]],
+    # ]
     ##########################################################################################################################################
 
 
@@ -1391,7 +1426,7 @@ def main():
         Helpers.moveArm((in_block[0][0], in_block[0][1], in_block[0][2] + around_block_z), in_block[1], node) # Move down
         Helpers.setGripperOpen(False, node)
         Helpers.moveArm((in_block[0][0], in_block[0][1], in_block[0][2] + above_block_z), in_block[1], node) # Move up
-
+        
         out_block_index = index % len(out_blocks)
 
         Helpers.moveArm((out_blocks[out_block_index][0][0], out_blocks[out_block_index][0][1], out_blocks[out_block_index][0][2] + above_block_z), out_blocks[out_block_index][1], node) # Move above out block
@@ -1400,20 +1435,6 @@ def main():
         Helpers.moveArm((out_blocks[out_block_index][0][0], out_blocks[out_block_index][0][1], out_blocks[out_block_index][0][2] + above_block_z), out_blocks[out_block_index][1], node) # Move above out block
 
         num_blocks_arr[out_block_index] += 1
-
-    ##########################################################################################################################################
-
-    # available_blocks_after_clearing = int(np.sum(num_blocks_arr[:len(out_blocks)]))
-
-    # final_plan = generate_tower_plan(
-    #                 tower_description=description_prompt,
-    #                 available_blocks=available_blocks_after_clearing,
-    #                 tower_center=[tower_x, tower_y, base_z],
-    #                 workspace=None,
-    #             )
-
-    # # tower_block_points = plan_to_tower_block_points(final_plan)
-    ##########################################################################################################################################
 
     #HERE can do more stuff with order of placement within a layer
     tower_block_num = 0
